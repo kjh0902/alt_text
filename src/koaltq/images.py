@@ -39,7 +39,9 @@ def clean_png_profile(raw):
 def load_image(path, *, svg_max_side=2048):
     raw = Path(path).read_bytes()
     raw, repaired = clean_png_profile(raw)
-    is_svg = b"<svg" in raw[:8192].lower()
+    # Raster metadata can contain an embedded SVG description; inspect a textual prefix first.
+    probe = raw.lstrip(b"\xef\xbb\xbf \t\r\n")
+    is_svg = probe.startswith(b"<") and b"<svg" in probe[:8192].lower()
     if is_svg:
         import resvg_py
         raw = resvg_py.svg_to_bytes(svg_string=raw.decode("utf-8-sig"), width=svg_max_side)
