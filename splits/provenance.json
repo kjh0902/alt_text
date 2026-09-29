@@ -1,0 +1,9 @@
+{
+  "source_notebook": "KoAltQ_Gemma4_1Epoch_Baseline.ipynb",
+  "source_notebook_sha256": "5385acb834bec5cbbe5781b13577d3642a928412669eb88a33c79c7f24594cb3",
+  "embedded_path": "splits/team_split.csv",
+  "split_sha256": "e34881f018d26eaf21ad8ca40ecedf9e095fffecbb8c112cfbf3eedb921ca862",
+  "membership": "unchanged",
+  "train": 1920,
+  "validation": 480
+}
