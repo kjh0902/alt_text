@@ -104,7 +104,7 @@ def load_model(args, *, training=False, adapter=None):
                               llm_int8_skip_modules=["visual", "lm_head"])
     model = Qwen3VLForConditionalGeneration.from_pretrained(
         args.model_id, revision=args.revision, cache_dir=args.model_cache_dir,
-        quantization_config=quant, torch_dtype=torch.bfloat16,
+        quantization_config=quant, dtype=torch.bfloat16,
         device_map={"": torch.cuda.current_device()}, attn_implementation="sdpa")
     for p in model.parameters():
         p.requires_grad_(False)

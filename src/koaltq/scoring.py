@@ -31,8 +31,13 @@ def candidate_beta(model, inputs, tokens):
     if hasattr(base, "model") and hasattr(base.model, "get_rope_index"):
         kwargs["position_ids"], _ = base.model.get_rope_index(
             full_ids, kwargs.get("image_grid_thw"), attention_mask=attention)
-    output = model(input_ids=full_ids, attention_mask=attention, use_cache=False,
-                   logits_to_keep=len(tokens), **kwargs)
+    with torch.autocast(
+        device_type="cuda",
+        dtype=torch.bfloat16,
+        enabled=full_ids.device.type == "cuda",
+    ):
+        output = model(input_ids=full_ids, attention_mask=attention, use_cache=False,
+                       logits_to_keep=len(tokens), **kwargs)
     logits = output.logits[0].float()
     if logits.shape[0] != len(tokens):
         raise ValueError("Model must honor logits_to_keep for label positions")
