@@ -14,7 +14,7 @@ from .prompts import L1_SYSTEM, L2_SYSTEM, l1_payload, l2_payload, parse_analysi
 from .scoring import label_token_ids, prediction_row, score_candidates
 
 PREPROCESS_VERSION = "rgb_white_first_frame_iccp_v1"
-TRUNCATION_VERSION = "longest_field_right_v1"
+TRUNCATION_VERSION = "longest_field_right_binary_v2"
 
 
 def pin_model_revision(args):

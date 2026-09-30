@@ -127,6 +127,8 @@ def main(command):
         generate_layer1(args, args.split, rows, root)
     elif command == "train":
         from .training import train
+        if not args.train_dir:
+            p.error("--train-dir is required")
         rows = load_records(args.train_dir, labeled=True)
         parts, _ = read_split(rows, args.split_file)
         train(args, parts["train"], parts["validation"], args.train_dir)

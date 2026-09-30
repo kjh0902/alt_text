@@ -100,6 +100,16 @@ def test_svg_preserves_aspect_ratio(tmp_path):
     assert image.size == (200, 100)
 
 
+def test_png_with_svg_metadata_is_still_raster(tmp_path):
+    from PIL.PngImagePlugin import PngInfo
+    metadata = PngInfo()
+    metadata.add_text("source", '<svg xmlns="http://www.w3.org/2000/svg"/>')
+    path = tmp_path / "raster.png"
+    Image.new("RGB", (4, 3), "blue").save(path, pnginfo=metadata)
+    image, details = load_image(path)
+    assert image.size == (4, 3) and details["format"] == "PNG"
+
+
 def test_submission_order_and_input_unchanged(tmp_path):
     template = tmp_path / "sample_submission.csv"
     raw = "record_id,label\nb,적절\na,적절\n"

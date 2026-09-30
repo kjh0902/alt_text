@@ -80,21 +80,24 @@ def prepare_input(processor, image, payload, *, stage, max_seq_length, reserve_t
     """Truncate field text, never the rendered image tokens, JSON, or class suffix."""
     payload = copy.deepcopy(payload)
     changed = set()
-    initial_length = None
     tokenizer = processor.tokenizer
-    for _ in range(128):
+
+    def render():
         messages = prompt_messages(stage, payload)
         if retry:
             messages[0]["content"][0]["text"] += "\n필수 키와 허용 값만 사용한 유효한 JSON을 출력하세요."
         text = processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
         inputs = processor(text=[text], images=[image], return_tensors="pt", padding=False)
         length = int(inputs["input_ids"].shape[1]) + reserve_tokens
-        if initial_length is None:
-            initial_length = length
+        return dict(inputs), length
+
+    inputs, length = render()
+    initial_length = length
+    for _ in range(128):
         if length <= max_seq_length:
-            return dict(inputs), {"original_token_length": initial_length,
-                                  "final_token_length": length, "reserved_tokens": reserve_tokens,
-                                  "truncated_fields": sorted(changed)}
+            return inputs, {"original_token_length": initial_length,
+                            "final_token_length": length, "reserved_tokens": reserve_tokens,
+                            "truncated_fields": sorted(changed)}
         choices = []
         for parent, key, name in _text_fields(payload):
             tokens = tokenizer.encode(parent[key], add_special_tokens=False)
@@ -102,8 +105,21 @@ def prepare_input(processor, image, payload, *, stage, max_seq_length, reserve_t
         size, name, parent, key, tokens = max(choices, key=lambda item: (item[0], item[1]))
         if not size:
             raise ValueError(f"--max-seq-length={max_seq_length} cannot fit fixed prompt/image/candidates ({length})")
-        keep = max(0, size - max(length - max_seq_length + 8, 1))
-        parent[key] = tokenizer.decode(tokens[:keep], skip_special_tokens=False)
         changed.add(name)
+        parent[key] = ""
+        inputs, length = render()
+        if length > max_seq_length:
+            continue
+        # JSON escaping can change token counts dramatically (e.g. many newlines).
+        # Find a fitting prefix using the actual rendered multimodal input, not a subtraction estimate.
+        low, high = 0, size
+        while low + 1 < high:
+            mid = (low + high) // 2
+            parent[key] = tokenizer.decode(tokens[:mid], skip_special_tokens=False)
+            trial, trial_length = render()
+            if trial_length <= max_seq_length:
+                low, inputs, length = mid, trial, trial_length
+            else:
+                high = mid
+        parent[key] = tokenizer.decode(tokens[:low], skip_special_tokens=False)
     raise RuntimeError("Input truncation failed to converge")
-
