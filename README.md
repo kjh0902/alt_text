@@ -147,3 +147,22 @@ python scripts/verify_inputs.py --train-dir "$TRAIN" --test-dir "$TEST" \
 이 검사의 placeholder 시각 분석은 품질 평가나 제출 예측에 사용하지 않습니다.
 
 실행 결과와 GPU 미실행 범위는 [검증 기록](docs/VERIFICATION.md)에 구분해 기록합니다.
+
+## 기존 실행에서 업데이트·재시도
+
+```bash
+git pull --ff-only
+# TRAIN과 RUN은 이전 Layer 1 실행에서 사용한 값 그대로 지정합니다.
+python scripts/run_layer1.py --split train --train-dir "$TRAIN" --run-dir "$RUN"
+# 이전 실패한 smoke adapter는 보존하고 새 디렉터리에서 검증합니다.
+python scripts/smoke_test.py --train-dir "$TRAIN" --run-dir runs/preflight_reload_fix --max-seq-length 8192
+```
+
+- 성공한 Layer 1 캐시는 재사용하며 실패·누락 항목만 생성합니다. 이전 truncation v1의 캐시도 입력 절삭이 없었고 이미지·문맥·모델·설정이 일치하면 재사용합니다. `reused / migrated / pending` 개수가 출력됩니다. 이전에 절삭된 캐시는 입력이 달라질 수 있어 재생성합니다.
+- 첫 zero-shot 생성은 그대로입니다. JSON 실패 후 재시도만 다른 복구 지시와 반복 억제를 적용합니다. 반복 제어는 새로 생성한 텍스트에만 적용하므로 페이지 입력에 있던 문구를 처음 OCR로 옮기는 것은 금지하지 않습니다.
+- JSON 문자열 내부의 실제 탭·줄바꿈 등은 내용을 유지해 읽고, 캐시 저장 시 정상 escape 처리합니다. 닫히지 않은 문자열·객체를 임의로 완성하거나 실패를 빈 OCR 성공으로 대체하지 않습니다.
+- 복구 기록은 `layer1/train_recovery.jsonl`, 끝내 실패한 원문·토큰 길이·재시도 설정은 `layer1/train_errors.json`에 남습니다. 실제 서버의 세 항목 성공 여부는 이 재실행으로 확인합니다.
+- adapter 재로딩은 학습·재개와 동일한 PEFT base 준비 및 dtype 정책을 사용합니다. 언어 모델 norm은 FP32, vision·embedding·출력층은 기존 학습 경로대로 BF16을 유지합니다. Layer 1 모델에는 이 변경을 적용하지 않습니다.
+- smoke의 `atol=0.08, rtol=0.005` 비교는 그대로 유지합니다. 실패하더라도 `gpu_smoke/reload_expected.json`, `reload_actual_profile.json`, `reload_scores.json`을 통해 dtype·양자화 설정과 점수를 확인할 수 있습니다. dtype 검사가 먼저 실패하면 scores 파일은 생성되지 않습니다.
+
+학습 대상은 계속 language_model의 QLoRA뿐이며, visual projection 전체는 동결 상태입니다. 일곱 후보 점수·분류 손실·class weight·분할은 변경하지 않았습니다.

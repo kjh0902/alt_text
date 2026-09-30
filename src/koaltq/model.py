@@ -30,7 +30,7 @@ def attach_language_lora(model, *, rank=8, alpha=16):
         p.requires_grad_(False)
     cfg = LoraConfig(r=rank, lora_alpha=alpha, lora_dropout=0.0, bias="none",
                      task_type="CAUSAL_LM", target_modules=language_lora_targets(model))
-    model = get_peft_model(model, cfg)
+    model = get_peft_model(model, cfg, autocast_adapter_dtype=True)
     check_trainable(model)
     return model
 
@@ -59,6 +59,40 @@ def load_processor(model_id, revision, max_image_tokens, cache_dir=None):
     return processor
 
 
+def prepare_adapter_base(model, *, training):
+    """Identical frozen base dtypes for training, resume, and adapter inference.
+
+    PEFT promotes non-quantized BF16 parameters (notably language RMSNorm weights)
+    to FP32. Skipping this on reload changes both normalization and the dtype of
+    activations entering 4-bit Linear layers. Only checkpointing differs here.
+    Layer 1 intentionally never calls this: its original zero-shot base is unchanged.
+    """
+    from peft import prepare_model_for_kbit_training
+    model = prepare_model_for_kbit_training(model, use_gradient_checkpointing=training,
+                                           gradient_checkpointing_kwargs={"use_reentrant": False})
+    # Match the original training path, including its memory-saving BF16 exceptions.
+    model.model.visual.to(dtype=torch.bfloat16)
+    model.model.language_model.embed_tokens.to(dtype=torch.bfloat16)
+    model.lm_head.to(dtype=torch.bfloat16)
+    model.model.visual.gradient_checkpointing_disable()
+    model.model.visual.requires_grad_(False)
+    model.config.use_cache = False
+    return model
+
+
+def model_numeric_profile(model):
+    """JSON-safe state relevant to reload consistency, excluding train/eval flags."""
+    return {
+        "parameters": {name: {"dtype": str(p.dtype), "type": type(p).__name__, "shape": list(p.shape)}
+                       for name, p in model.named_parameters()},
+        "quantized_modules": {name: {"compute_dtype": str(module.compute_dtype),
+                                     "quant_type": str(getattr(module.weight, "quant_type", None)),
+                                     "compress_statistics": getattr(module.weight, "compress_statistics", None)}
+                              for name, module in model.named_modules()
+                              if hasattr(module, "compute_dtype") and hasattr(module, "weight")},
+    }
+
+
 def load_model(args, *, training=False, adapter=None):
     from transformers import BitsAndBytesConfig, Qwen3VLForConditionalGeneration
     if not torch.cuda.is_available():
@@ -74,26 +108,18 @@ def load_model(args, *, training=False, adapter=None):
         device_map={"": torch.cuda.current_device()}, attn_implementation="sdpa")
     for p in model.parameters():
         p.requires_grad_(False)
+    if training or adapter is not None:
+        model = prepare_adapter_base(model, training=training)
     if training:
-        from peft import prepare_model_for_kbit_training
-        model = prepare_model_for_kbit_training(model, use_gradient_checkpointing=True,
-                                               gradient_checkpointing_kwargs={"use_reentrant": False})
-        # PEFT upcasts every non-quantized floating tensor. Keep large frozen modules in BF16.
-        model.model.visual.to(dtype=torch.bfloat16)
-        model.model.language_model.embed_tokens.to(dtype=torch.bfloat16)
-        model.lm_head.to(dtype=torch.bfloat16)
-        model.model.visual.gradient_checkpointing_disable()
-        model.model.visual.requires_grad_(False)
         if adapter:
             from peft import PeftModel
-            model = PeftModel.from_pretrained(model, str(adapter), is_trainable=True)
+            model = PeftModel.from_pretrained(model, str(adapter), is_trainable=True, autocast_adapter_dtype=True)
         else:
             model = attach_language_lora(model, rank=args.lora_rank, alpha=args.lora_alpha)
         check_trainable(model)
-        model.config.use_cache = False
     elif adapter:
         from peft import PeftModel
-        model = PeftModel.from_pretrained(model, str(adapter), is_trainable=False)
+        model = PeftModel.from_pretrained(model, str(adapter), is_trainable=False, autocast_adapter_dtype=True)
         for p in model.parameters():
             p.requires_grad_(False)
     model.eval()

@@ -9,7 +9,7 @@ from transformers import set_seed
 from . import LABELS
 from .data import select_records
 from .io import write_json
-from .model import check_trainable, gpu_environment, load_model, load_processor
+from .model import check_trainable, gpu_environment, load_model, load_processor, model_numeric_profile
 from .runtime import generate_layer1, pin_model_revision, prepare_layer2, require_cache, to_device
 from .scoring import class_weights, classification_loss, label_token_ids, score_candidates
 
@@ -65,14 +65,30 @@ def smoke_test(args):
         expected = score_candidates(model, to_device(inputs, model), candidates).float().cpu()
     trainable = check_trainable(model)
     model.save_pretrained(args.run_dir / "adapter", safe_serialization=True)
+    expected_profile = model_numeric_profile(model)
+    write_json(args.run_dir / "reload_expected.json", {
+        "scores": expected.tolist(), "numeric_profile": expected_profile,
+        "model_revision": args.revision, "record_id": row["record_id"]})
     gpu = gpu_environment()
     del model, optimizer, weights
     gc.collect()
     torch.cuda.empty_cache()
     reloaded = load_model(args, adapter=args.run_dir / "adapter")
+    actual_profile = model_numeric_profile(reloaded)
+    write_json(args.run_dir / "reload_actual_profile.json", actual_profile)
+    if actual_profile != expected_profile:
+        write_json(args.run_dir / "result.json", {"status": "GPU_TEST_FAILED", "reason": "base/adapter dtype or quantization profile differs"})
+        raise AssertionError("Training/reloaded numeric profiles differ; inspect reload_* JSON files")
     with torch.inference_mode():
         actual = score_candidates(reloaded, to_device(inputs, reloaded), candidates).float().cpu()
-    torch.testing.assert_close(actual, expected, atol=0.08, rtol=0.005)
+    write_json(args.run_dir / "reload_scores.json", {"expected": expected.tolist(), "actual": actual.tolist(),
+        "max_abs_difference": float((actual - expected).abs().max()), "atol": 0.08, "rtol": 0.005})
+    try:
+        torch.testing.assert_close(actual, expected, atol=0.08, rtol=0.005)
+    except AssertionError:
+        write_json(args.run_dir / "result.json", {"status": "GPU_TEST_FAILED", "reason": "adapter reload scores differ",
+                                                  "numeric_profiles_match": True})
+        raise
     report = {"status": "GPU_TEST_PASSED", "checks": checks, "gpu": gpu,
               "trainable": trainable, "reload_max_abs_difference": float((actual - expected).abs().max()),
               "model_revision": args.revision, "max_seq_length": args.max_seq_length,

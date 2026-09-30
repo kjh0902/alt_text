@@ -2,7 +2,7 @@
   "date": "2026-09-30",
   "scope": "local CPU and supplied data; no 8B GPU execution",
   "tests": {
-    "tests": "25",
+    "tests": "38",
     "failures": "0",
     "errors": "0",
     "skipped": "0"
@@ -204,5 +204,22 @@
   },
   "gpu_executed": false,
   "full_training_executed": false,
-  "real_submission_generated": false
+  "real_submission_generated": false,
+  "reload_recovery_fix": {
+    "cpu_tests_passed": 38,
+    "legacy_base_dtype_difference_reproduced": true,
+    "fixed_cpu_adapter_weights_and_scores_equal": true,
+    "cuda_quantization_tested": false,
+    "successful_cache_preservation_fixture": 1917,
+    "failed_record_fixture_ids": [
+      "r046bf6ae3c",
+      "r84a4c397ac",
+      "r59a621e5bb"
+    ],
+    "server_failed_records_rerun": false,
+    "gpu_assert_tolerance_unchanged": {
+      "atol": 0.08,
+      "rtol": 0.005
+    }
+  }
 }

@@ -20,7 +20,19 @@
 
 요약 수치와 환경은 [verification.json](verification.json)에 기록했습니다.
 
+## adapter reload / Layer 1 복구 수정 검증
+
+- 최신 전체 CPU 테스트 **38개 통과**, `pip check` 및 `git diff --check` 통과.
+- 기존 loader의 학습 경로에서는 PEFT 준비가 language RMSNorm을 FP32로 올리지만 추론 adapter 재로딩은 이를 건너뛰어 BF16으로 남는 차이를 재현했습니다. 양자화 생성 인자는 기존에도 같았으며, 준비 경로가 달랐습니다.
+- 실제 PEFT와 작은 BF16 Qwen 모델에서 수정된 학습·재개·재로딩의 모든 파라미터 dtype/형태가 일치하고 저장/복원된 파라미터와 일곱 후보 점수가 일치하는 것을 확인했습니다. 이 CPU 테스트는 CUDA 다운로드 경계를 대체하고 dense CPU 연산을 사용하므로 NF4 CUDA 커널 검증은 아닙니다.
+- 실제 GPU smoke의 기존 허용 오차 assert를 삭제하거나 완화하지 않았습니다. 검사 전에 numeric profile 일치를 추가 확인하고 실패 진단을 파일로 남깁니다.
+- raw tab/newline/control character 보존, strict-valid JSON 재직렬화, 미완성 JSON·잘못된 escape·잘못된 역할 거부 테스트 통과.
+- 1,917개 성공 캐시 + 보고된 세 ID 형태의 실패를 구성한 회귀 테스트에서 기존 분석을 보존하고 세 레코드만 재시도했습니다. 재실행 때 1,920개 모두 캐시에서 읽고 모델을 로드하지 않는 것도 확인했습니다. 이는 서버의 실제 실패 출력 재실행 결과가 아닌 재현용 fixture 테스트입니다.
+- 오래된 캐시는 절삭이 없고 다른 입력·이미지·설정 해시까지 맞을 때만 호환 처리합니다. 이미지/문맥이 바뀌거나 이전 입력이 절삭된 경우에는 재생성합니다.
+- 반복 억제가 prompt의 문구를 처음 출력하는 것은 막지 않고, 생성된 출력의 반복에만 적용되는 것을 확인했습니다.
+
 ## 실행하지 않은 범위
 
-RTX 5070 Ti에서 8B 모델 로딩·NF4 CUDA kernel·peak VRAM·전체 학습·실제 validation 점수·최종 test 예측은 아직 실행하지 않았습니다.
-원격 서버 실행 명령과 `scripts/smoke_test.py`를 제공합니다. CPU 테스트 성공을 GPU 학습 성공으로 간주하지 않습니다.
+이 로컬 세션에서는 RTX 5070 Ti의 8B 모델 로딩·NF4 CUDA kernel·peak VRAM·전체 학습·실제 validation 점수·최종 test 예측을 실행하지 않았습니다.
+사용자가 보고한 기존 서버 smoke 실패(최대 점수 차이 약 1.687)와 Layer 1 세 건 실패에 대해 코드를 수정했으며, 수정본의 실제 서버 재검증은 필요합니다.
+원격 서버 실행 명령과 `scripts/smoke_test.py`를 제공합니다. CPU 테스트 성공을 GPU 학습 성공이나 실제 세 레코드 복구 성공으로 간주하지 않습니다.

@@ -61,11 +61,22 @@ def validate_analysis(value, thumbnail):
     return value
 
 
-def parse_analysis(text, thumbnail):
+def parse_analysis(text, thumbnail, *, return_recovery=False):
     text = text.strip()
     if text.startswith("```") and text.endswith("```"):
         text = re.sub(r"^```(?:json)?\s*", "", text)[:-3].strip()
-    return validate_analysis(json.loads(text), thumbnail)
+    recovery = "none"
+    try:
+        value = json.loads(text)
+    except json.JSONDecodeError as exc:
+        # strict=False permits raw U+0000..U+001F *inside strings* only.
+        # It does not repair missing quotes/braces, invalid escapes, or schema errors.
+        if not exc.msg.startswith("Invalid control character"):
+            raise
+        value = json.loads(text, strict=False)
+        recovery = "raw_control_characters"
+    value = validate_analysis(value, thumbnail)
+    return (value, recovery) if return_recovery else value
 
 
 def _text_fields(payload):
@@ -85,7 +96,13 @@ def prepare_input(processor, image, payload, *, stage, max_seq_length, reserve_t
     def render():
         messages = prompt_messages(stage, payload)
         if retry:
-            messages[0]["content"][0]["text"] += "\n필수 키와 허용 값만 사용한 유효한 JSON을 출력하세요."
+            messages[0]["content"][0]["text"] += (
+                "\n이전 시도는 JSON 형식을 완성하지 못했습니다. 같은 문구를 생성 과정에서 계속 반복하지 마세요. "
+                "이미지에서 읽은 내용만 쓰고 visible_text 문자열의 따옴표와 JSON 객체를 반드시 닫으세요. "
+                "문자열 안의 탭과 줄바꿈은 JSON escape로 표현하세요. 필수 키와 허용 값만 사용하세요.")
+            if int(retry) >= 2:
+                messages[0]["content"][0]["text"] += (
+                    "\nOCR 반복 루프에 주의하세요. 이미 적은 문구를 다시 생성하지 말고 읽을 수 있는 나머지 내용으로 진행한 뒤 JSON을 끝내세요.")
         text = processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
         inputs = processor(text=[text], images=[image], return_tensors="pt", padding=False)
         length = int(inputs["input_ids"].shape[1]) + reserve_tokens
