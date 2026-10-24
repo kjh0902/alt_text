@@ -9,7 +9,7 @@ from koaltq.io import read_json, write_jsonl
 from koaltq.model import attach_language_lora
 from koaltq.prompts import l2_payload, prepare_input
 from koaltq.runtime import cache_path, l1_key, require_cache
-from koaltq.scoring import classification_loss, score_candidates
+from koaltq.scoring import joint_classification_loss, score_candidates
 from koaltq.training import load_training_state, save_checkpoint
 
 
@@ -81,7 +81,7 @@ def test_checkpoint_optimizer_scheduler_rng_restore(tiny_qwen, multimodal_input,
 
     def update(m, opt, sch):
         opt.zero_grad(set_to_none=True)
-        loss = classification_loss(score_candidates(m, multimodal_input, candidates, recompute=True), 2, torch.ones(7))
+        loss = joint_classification_loss(score_candidates(m, multimodal_input, candidates, recompute=True), 2, torch.ones(7))[0]
         loss.backward()
         opt.step()
         sch.step()

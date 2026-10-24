@@ -1,0 +1,73 @@
+{
+  "release": "KoAltQ_261014_guideline_v1.1",
+  "split_sha256": "e34881f018d26eaf21ad8ca40ecedf9e095fffecbb8c112cfbf3eedb921ca862",
+  "datasets": {
+    "koaltq_train": {
+      "release": "KoAltQ_261014_guideline_v1.1",
+      "archive_sha256": "92c3c9d82af116a6247b01ac68e7d3037c5e88d28e5d635e0a710d242374f8d6",
+      "previous_thumbnail_records_sha256": "3b3257c1c909181fc50846b32ec6650ced773c7ea0df9647c04e7c24b750ebb2",
+      "prepared_records_sha256": "ca7ff79c3bab41991e26a3e5ba128dbb3057e2dcc198499befae83e9be3c7726",
+      "record_count": 2400,
+      "changed_label_count": 59,
+      "thumbnail_counts": {
+        "false": 1662,
+        "true": 728,
+        "none": 10
+      },
+      "images_verified_unchanged": 2400
+    },
+    "koaltq_test_public": {
+      "release": "KoAltQ_261014_guideline_v1.1",
+      "archive_sha256": "ac12bae40871e04f685e44b0066334ffccbda8f986705884663bed04f9758861",
+      "previous_thumbnail_records_sha256": "377c9a5e225a6dee326a54c55bf686e7cab80b21947330785988d0c07329f46c",
+      "prepared_records_sha256": "377c9a5e225a6dee326a54c55bf686e7cab80b21947330785988d0c07329f46c",
+      "record_count": 600,
+      "changed_label_count": 0,
+      "thumbnail_counts": {
+        "false": 477,
+        "true": 117,
+        "none": 6
+      },
+      "images_verified_unchanged": 600
+    }
+  },
+  "split": {
+    "counts": {
+      "train": 1920,
+      "validation": 480
+    },
+    "per_class": {
+      "train": {
+        "불충분형": 446,
+        "적절": 1271,
+        "중복형": 128,
+        "파일명형": 21,
+        "무의미형": 20,
+        "장식오용형": 21,
+        "무관형": 13
+      },
+      "validation": {
+        "무관형": 2,
+        "불충분형": 118,
+        "중복형": 18,
+        "적절": 328,
+        "장식오용형": 5,
+        "무의미형": 4,
+        "파일명형": 5
+      }
+    },
+    "overlap": {
+      "page_url": 0,
+      "image_url": 0
+    },
+    "split_sha256": "e34881f018d26eaf21ad8ca40ecedf9e095fffecbb8c112cfbf3eedb921ca862"
+  },
+  "changed_by_split": {
+    "train": 41,
+    "validation": 18
+  },
+  "train_test_overlap": {
+    "page_url": 0,
+    "image_url": 0
+  }
+}

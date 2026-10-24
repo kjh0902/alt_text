@@ -12,7 +12,11 @@ Vision encoder, 최종 visual merger, DeepStack visual merger를 포함한 모�
 
 라벨 순서는 `적절, 무의미형, 파일명형, 중복형, 장식오용형, 불충분형, 무관형`입니다.
 `beta[c] = mean(log p(label_token | input, previous_label_tokens))`이고,
-`P = softmax(beta)`, `loss = -class_weight[y] * log_softmax(beta)[y]`입니다.
+`P = softmax(beta)`이고 기존 7범주 가중 손실에 이진 보조 손실을 추가합니다.
+`L_type = -class_weight[y] * log(P[y])`,
+`P_bin(적절)=P[적절]`, `P_bin(부적절)=sum(P[c] for c != 적절)`,
+`L_bin=-log(P_bin[b_y])`, `L_total=0.5*L_type+0.5*L_bin`입니다.
+`--binary-loss-weight 0`으로 기존 유형 손실만 사용할 수 있습니다. 클래스 가중치는 이진 손실에 적용하지 않습니다.
 정답 라벨의 생성 손실로 대체하지 않으며, 부정 후보까지 모두 autograd에 연결합니다.
 EOS·prompt·padding은 후보 토큰 평균에 포함하지 않습니다.
 
@@ -50,6 +54,26 @@ sample_submission.csv         # test 디렉터리
 분할은 제공된 Gemma 노트북의 내장 CSV를 그대로 추출한 것으로, ID와 page_url/image_url 누출을 실행 시 검증합니다.
 노트북의 학습법·프롬프트·Layer 3 정책은 가져오지 않았습니다.
 
+## 2026-10-14 수정 데이터셋 반영
+
+기존 분할 파일은 바이트 단위로 유지합니다. 공개 학습 59건(내부 학습 41 / 검증 18)의 라벨만
+갱신하고 기존 thumbnail 값을 record_id로 결합합니다. 원본·입력 문맥·이미지를 검증하며 순서로 병합하지 않습니다.
+새 원본 ZIP에는 thumbnail 파일이 없으므로 경로만 바꿔서 학습하면 안 됩니다.
+
+```bash
+python scripts/update_dataset.py \
+  --release-dir /path/to/data_261014/공개_데이터셋_20260917 \
+  --previous-train-dir /path/to/previous/koaltq_train \
+  --previous-test-dir /path/to/previous/koaltq_test_public \
+  --output-dir data/koaltq_261014
+```
+
+`--release-dir`에는 두 ZIP 또는 압축 해제된 `koaltq_train/`, `koaltq_test_public/`이 있어야 합니다.
+이 명령은 이미지를 포함한 독립 데이터 사본과 `migration_report.json`, `label_changes.jsonl`,
+분할별 `dataset_provenance.json`을 생성합니다. 기존 출력 디렉터리는 덮어쓰지 않습니다.
+기존 thumbnail 입력본이 없다면 [기존 썸네일 생성 절차](docs/REPRODUCIBILITY.md)를 따르세요.
+이전 입력본은 과거 라벨이 담긴 원래 파일이어야 하며, 이미 갱신한 파일은 41/18 검증에서 거부됩니다.
+
 이미지는 확장자가 아닌 내용으로 디코딩합니다. SVG는 resvg로 렌더링하고 첫 프레임·흰 배경 RGB로 통일합니다.
 PNG의 손상된 iCCP 체크섬만 메모리에서 복구하며, 픽셀 데이터 손상은 오류로 보고합니다. 원본 파일은 수정하지 않습니다.
 
@@ -59,9 +83,9 @@ PNG의 손상된 iCCP 체크섬만 메모리에서 복구하며, 픽셀 데이�
 하나의 run 디렉터리를 여러 프로세스가 동시에 수정하지 않도록 하세요.
 
 ```bash
-TRAIN=/absolute/path/koaltq_train
-TEST=/absolute/path/koaltq_test_public
-RUN=runs/qwen
+TRAIN=data/koaltq_261014/koaltq_train
+TEST=data/koaltq_261014/koaltq_test_public
+RUN=runs/qwen_261014_aux
 
 python scripts/prepare_data.py --train-dir "$TRAIN" --test-dir "$TEST" --run-dir "$RUN"
 
@@ -72,7 +96,8 @@ python scripts/run_layer1.py --split train --train-dir "$TRAIN" --run-dir "$RUN"
 python scripts/run_layer1.py --split validation --train-dir "$TRAIN" --run-dir "$RUN"
 python scripts/run_layer1.py --split test --test-dir "$TEST" --run-dir "$RUN"
 
-python scripts/train.py --train-dir "$TRAIN" --run-dir "$RUN" --epochs 3 --max-seq-length 8192
+python scripts/train.py --train-dir "$TRAIN" --run-dir "$RUN" --epochs 3 --max-seq-length 8192 \
+  --binary-loss-weight 0.5
 python scripts/evaluate.py --train-dir "$TRAIN" --run-dir "$RUN"
 python scripts/predict.py --test-dir "$TEST" --run-dir "$RUN" \
   --sample-submission "$TEST/sample_submission.csv" --output "$RUN/submission.csv"
@@ -82,6 +107,12 @@ python scripts/predict.py --test-dir "$TEST" --run-dir "$RUN" \
 모델은 첫 실행에서 Hugging Face revision SHA로 고정하며 `--model-cache-dir`로 다운로드 위치를 지정할 수 있습니다.
 Layer 1 캐시는 모델·프롬프트·이미지·입력 문맥·전처리가 일치할 때만 재사용합니다. alt·정답은 Layer 1 입력과 캐시 키에 포함하지 않습니다.
 JSON 생성은 최대 3회 시도하고, 실패 레코드는 기록한 뒤 재실행 시 재시도합니다. 누락되거나 오래된 캐시로 학습하지 않습니다.
+
+새 라벨·L2 프롬프트·손실을 사용한 학습은 새 run에서 시작하세요. 이전 체크포인트를 그대로 resume하지 않습니다.
+Layer 1 프롬프트·출력 스키마는 유지했으며, 동일 설정·모델 revision·thumbnail·이미지·문맥일 때 기존 캐시를
+재사용할 수 있습니다. 이전 run의 `model_revision.json`과 `layer1/`만 새 run에 복사하고 각 split의
+`run_layer1.py`를 실행해 유효성을 확인하세요. 체크포인트·training contract·검증 결과는 복사하지 않습니다.
+실행별 인자, 소스·의존성 파일 해시, 입력 파일 해시, 환경은 `invocations/`에 기록됩니다.
 
 ## 기본 학습 설정과 메모리
 
@@ -129,3 +160,8 @@ OOM은 조용히 샘플을 건너뛰지 않고 오류로 표시합니다. 필요
 Macro-F1은 일곱 클래스 고정 평균이고, Binary F1은 **부적절(여섯 클래스)을 양성**으로 계산합니다.
 `total_score = 0.5 * binary_f1 + 0.5 * macro_f1_7class`입니다.
 규칙에 따른 라벨 강제 변경이나 추가 후처리는 없습니다.
+
+Layer 2 프롬프트는 가이드라인 v1.1의 빈 alt 정보성 포스터와 현장 사진 구분, 링크·인접 문맥을 합친
+정보 충분성, 엄격한 무관형 기준을 반영합니다. test 600건은 전부 모델로 예측하며 경계 사례 정답을 읽지 않습니다.
+상세한 제출 절차·Windows 설정·검증 명령은 [재현 안내](docs/REPRODUCIBILITY.md),
+변경 범위와 유지한 수치 계산은 [방법 및 코드 검토](docs/METHOD_REVIEW.md)에 있습니다.

@@ -27,6 +27,9 @@ def parser(command):
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--lora-rank", type=int, default=8)
     p.add_argument("--lora-alpha", type=int, default=16)
+    if command in ("train", "smoke_test"):
+        p.add_argument("--binary-loss-weight", type=float, default=0.5,
+                       help="Binary auxiliary fraction; 0 retains the original type-only objective")
     if command == "run_layer1":
         p.add_argument("--split", choices=("train", "validation", "test"), required=True)
     if command == "train":
@@ -119,6 +122,10 @@ def main(command):
                 "lora_rank", "lora_alpha", "epochs", "gradient_accumulation", "save_steps"):
         if hasattr(args, key) and getattr(args, key) < 1:
             p.error(f"--{key.replace('_', '-')} must be positive")
+    if hasattr(args, "binary_loss_weight") and not 0 <= args.binary_loss_weight <= 1:
+        p.error("--binary-loss-weight must be finite and between 0 and 1")
+    from .reproducibility import record_invocation
+    record_invocation(args, command)
     if command == "prepare_data":
         prepare_data(args)
     elif command == "run_layer1":

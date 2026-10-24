@@ -81,6 +81,26 @@ def classification_loss(betas, target, weights):
     return -weights[target] * torch.log_softmax(betas.float(), dim=-1)[target]
 
 
+def joint_classification_loss(betas, target, weights, *, binary_weight=0.5):
+    """Weighted type CE plus unweighted binary CE from the same seven scores.
+
+    Sum six inappropriate probabilities in log space. No extra head/candidate.
+    binary_weight=0 reproduces the previous objective exactly.
+    """
+    if not 0 <= binary_weight <= 1:
+        raise ValueError("binary_weight must be finite and between 0 and 1")
+    type_loss = classification_loss(betas, target, weights)
+    log_probabilities = torch.log_softmax(betas.float(), dim=-1)
+    appropriate = LABELS.index("적절")
+    if target == appropriate:
+        binary_loss = -log_probabilities[appropriate]
+    else:
+        indices = [i for i in range(len(LABELS)) if i != appropriate]
+        binary_loss = -torch.logsumexp(log_probabilities[indices], dim=0)
+    total = (1 - binary_weight) * type_loss + binary_weight * binary_loss
+    return total, type_loss, binary_loss
+
+
 def prediction_row(record_id, betas, candidates):
     beta = betas.detach().float().cpu()
     probability = beta.softmax(dim=-1)

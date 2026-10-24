@@ -15,7 +15,7 @@ from .evaluation import save_evaluation
 from .io import append_jsonl, digest, read_json, write_json
 from .model import check_trainable, gpu_environment, load_model, load_processor
 from .runtime import infer_rows, l1_contract, l2_contract, pin_model_revision, prepare_layer2, require_cache, to_device
-from .scoring import class_weights, classification_loss, label_token_ids, score_candidates
+from .scoring import class_weights, joint_classification_loss, label_token_ids, score_candidates
 
 
 def training_contract(args, train, validation, train_cache, val_cache):
@@ -23,6 +23,8 @@ def training_contract(args, train, validation, train_cache, val_cache):
             "training": {key: getattr(args, key) for key in (
                 "epochs", "gradient_accumulation", "learning_rate", "weight_decay", "warmup_ratio",
                 "max_grad_norm", "seed", "rho", "lora_rank", "lora_alpha")},
+            "objective": {"version": "weighted_type_plus_grouped_binary_v1",
+                          "binary_loss_weight": args.binary_loss_weight},
             "train_sha256": digest(train), "validation_sha256": digest(validation),
             "train_cache_sha256": digest(train_cache), "validation_cache_sha256": digest(val_cache)}
 
@@ -117,22 +119,27 @@ def train(args, train_rows, validation_rows, root):
             batch = order[begin:begin + args.gradient_accumulation]
             optimizer.zero_grad(set_to_none=True)
             step_loss = 0.0
+            step_type_loss = step_binary_loss = 0.0
             for index in batch:
                 row = train_rows[index]
                 inputs = prepare_layer2(args, processor, candidates, row, root, train_cache[row["record_id"]])
                 betas = score_candidates(model, to_device(inputs, model), candidates, recompute=True)
-                loss = classification_loss(betas, LABELS.index(row["label"]), weights)
+                loss, type_loss, binary_loss = joint_classification_loss(
+                    betas, LABELS.index(row["label"]), weights, binary_weight=args.binary_loss_weight)
                 if not torch.isfinite(loss):
                     raise FloatingPointError(f"Non-finite loss: {row['record_id']}")
                 (loss / len(batch)).backward()
                 step_loss += float(loss.detach()) / len(batch)
-                del loss, betas, inputs
+                step_type_loss += float(type_loss.detach()) / len(batch)
+                step_binary_loss += float(binary_loss.detach()) / len(batch)
+                del loss, type_loss, binary_loss, betas, inputs
             norm = torch.nn.utils.clip_grad_norm_((p for p in model.parameters() if p.requires_grad),
                                                   args.max_grad_norm, error_if_nonfinite=True)
             optimizer.step()
             scheduler.step()
             state.update(epoch=epoch, cursor=begin + len(batch), step=state["step"] + 1)
             append_jsonl(out / "training_log.jsonl", {**state, "loss": step_loss,
+                "type_loss": step_type_loss, "binary_loss": step_binary_loss,
                 "grad_norm": float(norm), "learning_rate": scheduler.get_last_lr()[0]})
             if state["step"] % args.save_steps == 0 and state["cursor"] < len(order):
                 save_checkpoint(model, optimizer, scheduler, out, state, contract)
