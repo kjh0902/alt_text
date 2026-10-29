@@ -1,5 +1,2 @@
-# Validation and numerical tests only. No base-model downloads, CUDA or bnb.
---extra-index-url https://download.pytorch.org/whl/cpu
-torch==2.7.1+cpu
--r requirements-common.txt
-pytest>=8.3,<10
+# Compatibility entry point; canonical dependencies live at repository root.
+-r ../requirements-cpu.txt

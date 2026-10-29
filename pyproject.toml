@@ -3,15 +3,21 @@ requires = ["setuptools>=70"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "koaltq-qwen"
+name = "koaltq-gemma"
 version = "0.1.0"
-description = "Korean alt-text quality classification with frozen vision and language-only QLoRA"
+description = "KoAltQ Gemma NLL full-data QLoRA training and per-epoch test predictions"
 requires-python = ">=3.11"
 
 [tool.setuptools.packages.find]
-where = ["src"]
+where = ["."]
+include = ["gemma", "gemma.*"]
+exclude = ["gemma.tests", "gemma.tests.*"]
+namespaces = true
+
+[tool.setuptools.package-data]
+gemma = ["baseline_config.json", "METHOD_PRESERVATION.json", "runtime/prompts/*.txt", "resources/*.csv"]
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
-pythonpath = ["src"]
+testpaths = ["gemma/tests"]
+pythonpath = ["."]
 

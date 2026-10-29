@@ -1,2 +1,0 @@
-# Optional: only for regenerating the original browser-based thumbnail feature.
-playwright==1.55.0

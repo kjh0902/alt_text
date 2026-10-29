@@ -1,3 +1,2 @@
 * text=auto eol=lf
-splits/team_split.csv -text
 gemma/resources/*.csv -text

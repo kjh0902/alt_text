@@ -1,169 +1,166 @@
-# KoAltQ: Qwen3-VL 한국어 대체텍스트 품질 판정
+# KoAltQ Gemma NLL 전체 데이터 학습
 
-Gemma NLL 2,669건 전체 학습과 매 Epoch Test 예측은 별도 [Gemma 실행 안내](gemma/README.md)를 참고하세요.
+`KoAltQ_Gemma4_3Epoch_Improved.ipynb`의 NLL Baseline을 터미널용으로 옮겼습니다.
+기존 Train 2,400 + 공개 Test 정답 109 + 규칙 합성 160 = **2,669건 전체**를 학습합니다.
+Validation·K-Fold·Best Checkpoint 선택·Early Stopping·학습 재개는 사용하지 않습니다.
 
-`Qwen/Qwen3-VL-8B-Instruct`의 **language_model에만 QLoRA**를 적용합니다.
-Vision encoder, 최종 visual merger, DeepStack visual merger를 포함한 모든 visual projection은 동결합니다.
+## 설치: Linux + RTX 5070 Ti 16GB
 
-## 파이프라인
-
-1. `records_with_thumbnail.jsonl`과 이미지 검사, 고정 train 1,920 / validation 480 분할.
-2. Layer 0: 요청된 문자열 feature 여섯 개만 추출.
-3. Layer 1: alt와 정답을 제외한 이미지·문맥으로 zero-shot 시각 분석. 별도 명령으로 캐시 생성.
-4. Layer 2: 이미지·alt·문맥·feature·시각 분석을 입력하고 일곱 후보 라벨의 **평균 token log probability**를 비교.
-
-라벨 순서는 `적절, 무의미형, 파일명형, 중복형, 장식오용형, 불충분형, 무관형`입니다.
-`beta[c] = mean(log p(label_token | input, previous_label_tokens))`이고,
-`P = softmax(beta)`이고 기존 7범주 가중 손실에 이진 보조 손실을 추가합니다.
-`L_type = -class_weight[y] * log(P[y])`,
-`P_bin(적절)=P[적절]`, `P_bin(부적절)=sum(P[c] for c != 적절)`,
-`L_bin=-log(P_bin[b_y])`, `L_total=0.5*L_type+0.5*L_bin`입니다.
-`--binary-loss-weight 0`으로 기존 유형 손실만 사용할 수 있습니다. 클래스 가중치는 이진 손실에 적용하지 않습니다.
-정답 라벨의 생성 손실로 대체하지 않으며, 부정 후보까지 모두 autograd에 연결합니다.
-EOS·prompt·padding은 후보 토큰 평균에 포함하지 않습니다.
-
-## 설치: Ubuntu + RTX 5070 Ti 16GB
-
-Python 3.12 권장(최소 3.11). NVIDIA driver 580 계열 이상, CUDA 13.0 PyTorch wheel을 사용합니다.
-별도 CUDA toolkit이나 flash-attn 소스 빌드는 필요하지 않습니다.
+저장소 루트에서 Python 3.11과 CUDA 12.8을 지원하는 NVIDIA 드라이버를 사용합니다.
+별도 CUDA Toolkit 또는 flash-attn 설치는 필요하지 않습니다. 최초 실행은 Hugging Face 모델 다운로드가 필요합니다.
+Gemma 전용 가상환경 이름은 `.venv-gemma`입니다. 기존 `.venv` 대신 이 환경을 활성화한 뒤 설치·실행합니다.
 
 ```bash
-git clone https://github.com/kjh0902/alt_text.git
-cd alt_text
-python3 -m venv .venv
-source .venv/bin/activate
+python3.11 -m venv .venv-gemma
+source .venv-gemma/bin/activate
 python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
 python -m pip check
 ```
 
-주요 버전: torch 2.9.1+cu130, torchvision 0.24.1+cu130, transformers 4.57.6,
-peft 0.18.1, bitsandbytes 0.48.2, accelerate 1.12.0.
-GPU wheel: [PyTorch 공식 배포](https://pytorch.org/get-started/previous-versions/),
-Blackwell 지원: [bitsandbytes 0.48.2](https://huggingface.co/docs/bitsandbytes/v0.48.2/installation).
+주요 버전은 원본과 같은 torch **2.7.1+cu128**, torchvision **0.22.1+cu128**,
+transformers **5.17.0**, peft **0.21.0**, bitsandbytes **0.50.2**,
+accelerate **1.15.0**, huggingface-hub **1.32.0**입니다.
+Blackwell 지원은 [PyTorch 2.7](https://pytorch.org/blog/pytorch-2-7/),
+`sm_120`은 [NVIDIA 표](https://developer.nvidia.com/cuda/gpus),
+NF4/CUDA 12.8 빌드는 [bitsandbytes 문서](https://huggingface.co/docs/bitsandbytes/v0.50.2/installation)를 참고하세요.
 
-## 데이터 위치
+## 단일 명령 실행
 
-각 `--train-dir` / `--test-dir` 바로 아래에 다음 파일이 있어야 합니다.
+데이터는 다음과 같이 압축 해제되어 있어야 합니다. 원본 파일은 수정하지 않습니다.
+입력은 `records.jsonl`과 이미지이며 추가 썸네일 파일은 필요하지 않습니다.
 
 ```text
-records_with_thumbnail.jsonl
-images/
-sample_submission.csv         # test 디렉터리
+data/koaltq_261014/
+  koaltq_train/records.jsonl
+  koaltq_train/images/
+  koaltq_test_public/records.jsonl
+  koaltq_test_public/images/
+  koaltq_test_public/sample_submission.csv
 ```
-
-`records.jsonl`은 읽지 않습니다. thumbnail의 JSON null은 unknown으로 정규화합니다.
-분할은 제공된 Gemma 노트북의 내장 CSV를 그대로 추출한 것으로, ID와 page_url/image_url 누출을 실행 시 검증합니다.
-노트북의 학습법·프롬프트·Layer 3 정책은 가져오지 않았습니다.
-
-## 2026-10-14 수정 데이터셋 반영
-
-기존 분할 파일은 바이트 단위로 유지합니다. 공개 학습 59건(내부 학습 41 / 검증 18)의 라벨만
-갱신하고 기존 thumbnail 값을 record_id로 결합합니다. 원본·입력 문맥·이미지를 검증하며 순서로 병합하지 않습니다.
-새 원본 ZIP에는 thumbnail 파일이 없으므로 경로만 바꿔서 학습하면 안 됩니다.
 
 ```bash
-python scripts/update_dataset.py \
-  --release-dir /path/to/data_261014/공개_데이터셋_20260917 \
-  --previous-train-dir /path/to/previous/koaltq_train \
-  --previous-test-dir /path/to/previous/koaltq_test_public \
-  --output-dir data/koaltq_261014
+python gemma/train.py \
+  --data-root /home/junhyung/Documents/vscode/alt_text/data/koaltq_261014 \
+  --epochs 3 \
+  --run-dir /home/junhyung/Documents/vscode/alt_text/runs/gemma_full_3ep
 ```
 
-`--release-dir`에는 두 ZIP 또는 압축 해제된 `koaltq_train/`, `koaltq_test_public/`이 있어야 합니다.
-이 명령은 이미지를 포함한 독립 데이터 사본과 `migration_report.json`, `label_changes.jsonl`,
-분할별 `dataset_provenance.json`을 생성합니다. 기존 출력 디렉터리는 덮어쓰지 않습니다.
-기존 thumbnail 입력본이 없다면 [기존 썸네일 생성 절차](docs/REPRODUCIBILITY.md)를 따르세요.
-이전 입력본은 과거 라벨이 담긴 원래 파일이어야 하며, 이미 갱신한 파일은 41/18 검증에서 거부됩니다.
+`--run-dir`는 아직 존재하지 않는 새 폴더여야 합니다. 중단 후에도 새 폴더에서 처음부터 시작합니다.
+생략하면 저장소의 `runs/gemma_<시각>/`을 만듭니다. `--epochs`는 1 이상의 정수이고,
+그 Epoch 수를 기준으로 기존 warmup·선형 감소 스케줄을 계산합니다.
 
-이미지는 확장자가 아닌 내용으로 디코딩합니다. SVG는 resvg로 렌더링하고 첫 프레임·흰 배경 RGB로 통일합니다.
-PNG의 손상된 iCCP 체크섬만 메모리에서 복구하며, 픽셀 데이터 손상은 오류로 보고합니다. 원본 파일은 수정하지 않습니다.
+추가 옵션:
 
-## 실행 순서
-
-아래 경로 변수만 서버 환경에 맞춰 변경하세요. 공통 설정을 변경하면 모든 단계에 같은 인자를 전달하세요.
-하나의 run 디렉터리를 여러 프로세스가 동시에 수정하지 않도록 하세요.
-
-```bash
-TRAIN=data/koaltq_261014/koaltq_train
-TEST=data/koaltq_261014/koaltq_test_public
-RUN=runs/qwen_261014_aux
-
-python scripts/prepare_data.py --train-dir "$TRAIN" --test-dir "$TEST" --run-dir "$RUN"
-
-# 실제 GPU 역전파 및 저장/복원 검사. 전체 실행 전에 별도 디렉터리에서 수행합니다.
-python scripts/smoke_test.py --train-dir "$TRAIN" --run-dir runs/preflight --max-seq-length 8192
-
-python scripts/run_layer1.py --split train --train-dir "$TRAIN" --run-dir "$RUN"
-python scripts/run_layer1.py --split validation --train-dir "$TRAIN" --run-dir "$RUN"
-python scripts/run_layer1.py --split test --test-dir "$TEST" --run-dir "$RUN"
-
-python scripts/train.py --train-dir "$TRAIN" --run-dir "$RUN" --epochs 3 --max-seq-length 8192 \
-  --binary-loss-weight 0.5
-python scripts/evaluate.py --train-dir "$TRAIN" --run-dir "$RUN"
-python scripts/predict.py --test-dir "$TEST" --run-dir "$RUN" \
-  --sample-submission "$TEST/sample_submission.csv" --output "$RUN/submission.csv"
-```
-
-학습 재개는 동일한 설정에 `--resume`을 추가합니다. 재개 가능한 체크포인트는 optimizer step 경계에서 저장합니다.
-모델은 첫 실행에서 Hugging Face revision SHA로 고정하며 `--model-cache-dir`로 다운로드 위치를 지정할 수 있습니다.
-Layer 1 캐시는 모델·프롬프트·이미지·입력 문맥·전처리가 일치할 때만 재사용합니다. alt·정답은 Layer 1 입력과 캐시 키에 포함하지 않습니다.
-JSON 생성은 최대 3회 시도하고, 실패 레코드는 기록한 뒤 재실행 시 재시도합니다. 누락되거나 오래된 캐시로 학습하지 않습니다.
-
-새 라벨·L2 프롬프트·손실을 사용한 학습은 새 run에서 시작하세요. 이전 체크포인트를 그대로 resume하지 않습니다.
-Layer 1 프롬프트·출력 스키마는 유지했으며, 동일 설정·모델 revision·thumbnail·이미지·문맥일 때 기존 캐시를
-재사용할 수 있습니다. 이전 run의 `model_revision.json`과 `layer1/`만 새 run에 복사하고 각 split의
-`run_layer1.py`를 실행해 유효성을 확인하세요. 체크포인트·training contract·검증 결과는 복사하지 않습니다.
-실행별 인자, 소스·의존성 파일 해시, 입력 파일 해시, 환경은 `invocations/`에 기록됩니다.
-
-## 기본 학습 설정과 메모리
-
-| 설정 | 값 |
+| 옵션 | 기본값 / 용도 |
 |---|---|
-| 기반 언어 모델 | 4-bit NF4, double quantization, BF16 compute |
-| 학습 파라미터 | language_model의 q/k/v/o/gate/up/down projection LoRA만 |
-| LoRA | rank 8, alpha 16, dropout 0 |
-| 시각 모듈 | encoder와 모든 projection 동결, LoRA 없음 |
-| batch / gradient accumulation | 1 / 8 |
-| optimizer / learning rate | AdamW / 1e-4 |
-| weight decay / warmup / clipping | 0.01 / 5% / 1.0 |
-| epochs / seed | 3 / 42 |
-| Layer 1 / Layer 2 이미지 예산 | 최대 1024 / 512 visual tokens |
-| checkpoint 선택 | validation total score 최고, 동점이면 먼저 나온 epoch |
+| `--layer1-cache-dir /path/to/previous_run` | 이전 실행의 `actual_model_api.json`과 `cache/layer1/` 재사용 |
+| `--boundary-csv /path/to/경계사례_20261013.csv` | 기본은 동봉한 사무국 공개 CSV |
+| `--sample-submission /path/to/sample_submission.csv` | 기본은 Test 폴더, 없으면 데이터 루트에서 탐색 |
+| `--model-cache-dir /path/to/models` | 기본은 저장소 `.cache/gemma_models/` |
+| `--validate-only` | GPU나 모델 다운로드 없이 데이터·이미지·합성·제출 ID 검사 후 종료 |
 
-Class-Balanced weight는 train split의 빈도만 사용합니다.
-`raw[c]=(1-rho)/(1-rho**n[c])`, `w[c]=7*raw[c]/sum(raw)`, 기본 rho는 0.99입니다.
-batch 1에서 가중치가 소거되는 weighted CE mean reduction을 사용하지 않습니다.
+Layer 1 캐시는 모델 revision·양자화·processor·프롬프트·이미지 내용·생성 설정·JSON 형식을 확인합니다.
+GPU/OS/패키지 버전/코드 해시 차이는 기존 가져오기 방식대로 기록하며, 모델 조건이 다르면 중단합니다.
+유효한 항목만 가져오고 누락분은 기본 Gemma로 생성합니다. 원본 캐시를 덮어쓰지 않습니다.
+Train/Test 전체 Layer 1을 준비한 후 합성본에는 원본의 분석을 연결합니다.
+Layer 2의 CPU processor 출력도 내용 기반 캐시에 한 번 저장하므로 매 Epoch 이미지 처리·토큰화를 반복하지 않습니다.
 
-일곱 후보를 순차 계산하고, 후보 전체의 non-reentrant checkpoint와 decoder checkpoint를 사용해 activation 메모리를 줄입니다.
-label 예측 위치의 logits만 계산하고, 학습에서는 KV cache를 끕니다. 학습 속도보다 16GB 메모리 사용을 우선한 구성입니다.
-16GB 실사용 적합성은 서버의 `smoke_test.py` 성공 및 peak VRAM 기록으로 확인해야 합니다.
-OOM은 조용히 샘플을 건너뛰지 않고 오류로 표시합니다. 필요하면 새 run에서 `--max-image-tokens` 또는 `--max-seq-length`를 낮추세요.
+## 유지한 학습법과 변경 이유
 
-### 입력 길이 초과
+| 항목 | 설정 |
+|---|---|
+| 모델 / revision | `google/gemma-4-E4B-it` / `ee0ef6023621cff504d758262d4e04895a5af4a2` |
+| Loss | 기존 예제별 정답 라벨 토큰 평균 NLL × 클래스 가중치, 예제 수로 평균 |
+| LoRA | 언어 self-attention `q_proj`, `o_proj`; r=8, alpha=16, dropout=0 |
+| 양자화 / dtype | NF4 4-bit, double quantization, BF16 |
+| 최적화 | AdamW, lr=1e-4, weight decay=0.01, warmup 5%, gradient clip=1 |
+| 배치 | microbatch 1 × accumulation 8, 유효 배치 8; 마지막 5건도 학습 |
+| 메모리 | 기존 비재진입 gradient checkpointing 유지, 모델 전체 FP32 변환 없음 |
+| 추론 | 기존 7개 라벨 전체 토큰 `sum_logprob`; 기존 Layer 3 후처리 |
+| Layer 1 | 기존 alt·정답을 제외하는 프롬프트, `schema_recovery_v3` 유지 |
 
-`--max-seq-length 8192`로 최대 길이를 설정합니다. 한도를 넘으면 **자동 절삭 후 학습을 계속**합니다.
-가장 긴 텍스트 필드부터 뒤를 줄이고, 이미지 토큰·고정 지시문·구조화 feature·범주·후보 라벨은 보존합니다.
-일곱 후보는 같은 절삭된 입력을 사용하며 Layer 0 feature는 절삭 전 원문에서 계산합니다.
-`truncation.jsonl`과 콘솔에 record_id, 절삭 전/후 실제 토큰 길이, 절삭 필드를 기록합니다.
-고정 지시문·이미지 자체조차 들어가지 않는 비정상적으로 작은 한도는 오류입니다.
+원본 Notebook이 시험하던 batch 1/2 중 **1을 고정**해 16GB 메모리 여유를 확보하며 유효 배치와 Loss는 유지합니다.
+입력 문맥·이미지 해상도·LoRA 구조는 자동 축소하지 않습니다. CUDA/BF16/NF4 검사 후,
+긴 문맥 표본에서 실제 LoRA 갱신과 메모리를 확인합니다. 이 검사에 쓴 어댑터는 버리고
+동일 초기값의 새 어댑터로 전체 학습합니다. OOM이나 입력 상한 초과 시 진단과 이전 Epoch 결과를 보존하고 종료합니다.
 
-## 결과 파일
+학습 데이터 변경에 따라 step 수와 클래스 가중치는 달라집니다.
+기본값은 Epoch당 **334 step**, 총 **1,002 step / 8,007개 예제 처리**입니다.
+클래스 가중치와 Layer 3 정책은 합성본을 제외한 실제 2,509건으로 결정합니다.
+공개 Test 109건은 동봉 CSV의 `데이터셋_라벨`만 사용하며 `재판정_라벨`을 사용하지 않습니다.
+합성은 원본 Train에서 seed 42, 페이지당 최대 3건으로 만들고
+중복형·파일명형·무관형·무의미형을 각 40건 검증합니다. 생성 목표에 못 미치면 학습하지 않습니다.
+최종 분포는 적절 1,619 / 불충분형 647 / 중복형 187 / 파일명형 66 /
+무의미형 65 / 장식오용형 30 / 무관형 55입니다.
 
-- `layer0/{train,validation,test}.jsonl`: 여섯 feature.
-- `layer1/{train,validation,test}.jsonl`: visual_role, thumbnail_type, visible_text 및 provenance.
-- `class_weights.json`: train class counts와 정규화 가중치.
-- `trainable_parameters.json`: 실제 trainable 이름과 개수, 시각 모듈 동결 확인.
-- `checkpoints/`, `best_checkpoint.json`, `last_checkpoint.json`: adapter와 재개 상태.
-- `validation/epoch_*/metrics.json`, `validation/best/metrics.json`: 평가 결과.
-- `test_predictions.jsonl`: record_id, prediction, 각 클래스의 beta·probability·token_count.
-- `submission.csv`: sample_submission의 ID와 순서를 유지한 새 파일. 원본은 보존.
+## 저장 결과
 
-Macro-F1은 일곱 클래스 고정 평균이고, Binary F1은 **부적절(여섯 클래스)을 양성**으로 계산합니다.
-`total_score = 0.5 * binary_f1 + 0.5 * macro_f1_7class`입니다.
-규칙에 따른 라벨 강제 변경이나 추가 후처리는 없습니다.
+```text
+RUN_DIR/
+  config.json                  # 실제 설정과 변경 이유
+  data_audit.json              # 개수·분포·중복·입력 해시·이미지 검사
+  class_weights.json
+  synthetic_train.jsonl
+  layer0_flags.json
+  layer3_policy.json
+  cache/layer1/
+  cache/encoded_inputs/
+  run.log
+  training_summary.json
+  epochs/epoch_01/              # epoch_02, epoch_03 등
+    adapter/                   # 해당 Epoch LoRA, 해시 포함
+    model_predictions.csv      # Layer 2 원본, 600행
+    submission.csv             # 기존 Layer 3 적용, 600행
+    submission_boundary109.csv  # submission의 109건만 공개 정답 적용
+    prediction_details.json    # 7개 후보 점수와 후처리 내역
+    train_steps.jsonl
+    epoch_summary.json         # 예제 수 가중 평균 Train Loss·시간·메모리·해시
+    epoch.log
+```
 
-Layer 2 프롬프트는 가이드라인 v1.1의 빈 alt 정보성 포스터와 현장 사진 구분, 링크·인접 문맥을 합친
-정보 충분성, 엄격한 무관형 기준을 반영합니다. test 600건은 전부 모델로 예측하며 경계 사례 정답을 읽지 않습니다.
-상세한 제출 절차·Windows 설정·검증 명령은 [재현 안내](docs/REPRODUCIBILITY.md),
-변경 범위와 유지한 수치 계산은 [방법 및 코드 검토](docs/METHOD_REVIEW.md)에 있습니다.
+매 Epoch 저장한 Adapter 파일의 실제 해시와 추론 가중치 해시를 대조합니다.
+이전 Epoch 예측을 재사용하지 않으며 세 CSV 모두 `record_id,label` 두 열,
+sample submission 순서의 고유 ID 600개를 검증합니다. 109건 보정 전 결과도 보존합니다.
+Test 정답 109건을 학습에 사용하므로 해당 항목의 결과를 독립 검증 성능으로 보고하지 않습니다.
+
+## CPU 검증과 테스트
+
+GPU 환경 설치 대신 CPU 검증 환경을 구성할 때도 `.venv-gemma`를 사용하고,
+루트의 `requirements-cpu.txt`를 설치합니다.
+
+```bash
+python3.11 -m venv .venv-gemma
+source .venv-gemma/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -r requirements-cpu.txt
+python -m pip check
+python gemma/train.py --data-root data/koaltq_261014 --run-dir runs/gemma_cpu_check --validate-only
+python -m pytest -q
+```
+
+CPU 검증 범위와 실제 실행 결과는 [검증 기록](gemma/VERIFICATION.md),
+원본 코드·프롬프트 해시는 [METHOD_PRESERVATION.json](gemma/METHOD_PRESERVATION.json)에 기록합니다.
+CPU 검사와 모의 모델 검사는 실제 RTX 5070 Ti에서의 학습 완료를 의미하지 않습니다.
+
+## 저장소 구조
+
+```text
+README.md                  # 설치·실행 안내
+requirements.txt           # Gemma GPU 환경
+requirements-cpu.txt       # CPU 검증·테스트 환경
+requirements-common.txt    # 공통 의존성
+pyproject.toml             # Gemma 패키지와 기본 테스트 설정
+gemma/
+  train.py                 # 기존 실행 진입점
+  data.py, cache.py, workflow.py
+  runtime/koaltq/           # 모델·NLL·Layer 0~3·이미지·GPU 검사
+  runtime/prompts/          # 원본 프롬프트
+  data_work/               # 합성 생성·검증 공통 코드
+  resources/               # 공개 라벨 CSV
+  tests/                   # Gemma CPU 테스트
+```
+
+`gemma/requirements.txt`와 `gemma/requirements-cpu.txt`는 기존 설치 명령 호환용으로
+루트 Requirements를 읽습니다. 의존성 수정은 루트 파일에서만 합니다.
+자동 테스트는 Linux와 Windows에서 CPU Requirements와 `python -m pytest -q`를 사용합니다.

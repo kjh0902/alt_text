@@ -1,3 +1,4 @@
+# Local Python environments; Gemma uses .venv-gemma.
 .venv/
 .venv-gemma/
 __pycache__/

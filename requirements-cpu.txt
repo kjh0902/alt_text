@@ -1,6 +1,5 @@
-# Local verification only. This does not run the 8B model or validate CUDA kernels.
+# Validation and numerical tests only. No base-model downloads, CUDA or bnb.
 --extra-index-url https://download.pytorch.org/whl/cpu
-torch==2.9.1+cpu
-torchvision==0.24.1+cpu
+torch==2.7.1+cpu
 -r requirements-common.txt
-
+pytest>=8.3,<10
