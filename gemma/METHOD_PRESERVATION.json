@@ -1,0 +1,129 @@
+{
+  "source": "KoAltQ_Gemma4_3Epoch_Improved.ipynb + runtime/nll + data_work",
+  "original_file_sha256": {
+    "runtime/koaltq/__init__.py": "ab70c27bc21d761bc0a5af2fa8157e07998e374a22d4f97168584ecac39ab520",
+    "runtime/koaltq/utils.py": "9c9848e2635ba3f7c7ccc64324ab7254391c685b4fd04ccd208c94505534de08",
+    "runtime/koaltq/images.py": "d1b9adeac149f1f0469a9bf88544e209effa9e30b23cb57f9b697c3c3d5dee3f",
+    "runtime/koaltq/layer0.py": "36cae690eabd6ad84231b6c0346831519e3f6a48d2bae0bfff04d0b0f028a967",
+    "runtime/koaltq/prompts.py": "a7d53e607f5594dbe0dc5907e3ad5d3fb18f68ffe0e9bc4e620531d1dfad45bc",
+    "runtime/koaltq/scoring.py": "c9e5ba2900190c5a2b63f67fd8430ace421d01364a927d409187417aa34fa887",
+    "runtime/koaltq/model.py": "6cbc040d0fa869b7775b946b27ce7a94cf5205253ebdd2a76145a2c8dfd57938",
+    "runtime/koaltq/gpu_memory.py": "0668e9342424ae484f58e4059c196c04e8250a27d1c5d344c1c1802edced401f",
+    "runtime/koaltq/l1_recovery.py": "cbb5ca3a1fa8d4cd5838b5f8beb0d1b07fe691547dae49f1b180846a46c47471",
+    "runtime/koaltq/layer1_source.py": "3d156c614a570ff5feb0f74c75e90267e165d40c6725642eb44efb4f88001b42",
+    "runtime/koaltq/pipeline.py": "f58c904f69e2a62ffca3cabd9eb07cbdc863374da3b84bc31d306963cd9ff0c4",
+    "runtime/koaltq/smoke.py": "88586216d2f77a623fa5495b2741a917cce2e7cf1e6ba7c5249ae9437580d298",
+    "runtime/prompts/layer1_prompt.txt": "8a8948346b14a204a325f7159962eebdbedcb54d0ba65b8e76ac7b29a5a3e121",
+    "runtime/prompts/layer2_prompt.txt": "053741f07c75a4247a2adfbf02c111a6468f5c0c1b89697a8e1f023ac2c145bf",
+    "data_work/augment_rules.py": "dbee7566a01af4a8f2d1e21afb9f31d96b6d670b75a9adba2c5ff2507246a180",
+    "data_work/check_augment.py": "6473e1f9d50c2b97b247298f41c044fea8149e353fdfcf72615bc836951b7be8",
+    "data_work/common.py": "b368ba474b8bb93d973c4491ebf2465360c2b0a36c9cfea5d964cc093a9e2890",
+    "runtime/koaltq/layer3.py": "0c8133c80dd5c918a961f00338fe38b3f29526f5bc8af683305023f96d195ee8"
+  },
+  "files": {
+    "runtime/koaltq/__init__.py": {
+      "original_sha256": "ab70c27bc21d761bc0a5af2fa8157e07998e374a22d4f97168584ecac39ab520",
+      "current_sha256": "ab70c27bc21d761bc0a5af2fa8157e07998e374a22d4f97168584ecac39ab520",
+      "identical": true
+    },
+    "runtime/koaltq/utils.py": {
+      "original_sha256": "9c9848e2635ba3f7c7ccc64324ab7254391c685b4fd04ccd208c94505534de08",
+      "current_sha256": "9c9848e2635ba3f7c7ccc64324ab7254391c685b4fd04ccd208c94505534de08",
+      "identical": true
+    },
+    "runtime/koaltq/images.py": {
+      "original_sha256": "d1b9adeac149f1f0469a9bf88544e209effa9e30b23cb57f9b697c3c3d5dee3f",
+      "current_sha256": "d1b9adeac149f1f0469a9bf88544e209effa9e30b23cb57f9b697c3c3d5dee3f",
+      "identical": true
+    },
+    "runtime/koaltq/layer0.py": {
+      "original_sha256": "36cae690eabd6ad84231b6c0346831519e3f6a48d2bae0bfff04d0b0f028a967",
+      "current_sha256": "36cae690eabd6ad84231b6c0346831519e3f6a48d2bae0bfff04d0b0f028a967",
+      "identical": true
+    },
+    "runtime/koaltq/prompts.py": {
+      "original_sha256": "a7d53e607f5594dbe0dc5907e3ad5d3fb18f68ffe0e9bc4e620531d1dfad45bc",
+      "current_sha256": "a7d53e607f5594dbe0dc5907e3ad5d3fb18f68ffe0e9bc4e620531d1dfad45bc",
+      "identical": true
+    },
+    "runtime/koaltq/scoring.py": {
+      "original_sha256": "c9e5ba2900190c5a2b63f67fd8430ace421d01364a927d409187417aa34fa887",
+      "current_sha256": "c9e5ba2900190c5a2b63f67fd8430ace421d01364a927d409187417aa34fa887",
+      "identical": true
+    },
+    "runtime/koaltq/model.py": {
+      "original_sha256": "6cbc040d0fa869b7775b946b27ce7a94cf5205253ebdd2a76145a2c8dfd57938",
+      "current_sha256": "6cbc040d0fa869b7775b946b27ce7a94cf5205253ebdd2a76145a2c8dfd57938",
+      "identical": true
+    },
+    "runtime/koaltq/gpu_memory.py": {
+      "original_sha256": "0668e9342424ae484f58e4059c196c04e8250a27d1c5d344c1c1802edced401f",
+      "current_sha256": "0668e9342424ae484f58e4059c196c04e8250a27d1c5d344c1c1802edced401f",
+      "identical": true
+    },
+    "runtime/koaltq/l1_recovery.py": {
+      "original_sha256": "cbb5ca3a1fa8d4cd5838b5f8beb0d1b07fe691547dae49f1b180846a46c47471",
+      "current_sha256": "cbb5ca3a1fa8d4cd5838b5f8beb0d1b07fe691547dae49f1b180846a46c47471",
+      "identical": true
+    },
+    "runtime/koaltq/layer1_source.py": {
+      "original_sha256": "3d156c614a570ff5feb0f74c75e90267e165d40c6725642eb44efb4f88001b42",
+      "current_sha256": "8cfeda87b98cfb2cab2d6c141f38b5d74113a7c2e97c760c17852d270522ca80",
+      "identical": false
+    },
+    "runtime/koaltq/pipeline.py": {
+      "original_sha256": "f58c904f69e2a62ffca3cabd9eb07cbdc863374da3b84bc31d306963cd9ff0c4",
+      "current_sha256": "d23875606fc855a26ecea5f0066c70547030602fff36b9fcbe9fac284661fa85",
+      "identical": false
+    },
+    "runtime/koaltq/smoke.py": {
+      "original_sha256": "88586216d2f77a623fa5495b2741a917cce2e7cf1e6ba7c5249ae9437580d298",
+      "current_sha256": "88586216d2f77a623fa5495b2741a917cce2e7cf1e6ba7c5249ae9437580d298",
+      "identical": true
+    },
+    "runtime/prompts/layer1_prompt.txt": {
+      "original_sha256": "8a8948346b14a204a325f7159962eebdbedcb54d0ba65b8e76ac7b29a5a3e121",
+      "current_sha256": "8a8948346b14a204a325f7159962eebdbedcb54d0ba65b8e76ac7b29a5a3e121",
+      "identical": true
+    },
+    "runtime/prompts/layer2_prompt.txt": {
+      "original_sha256": "053741f07c75a4247a2adfbf02c111a6468f5c0c1b89697a8e1f023ac2c145bf",
+      "current_sha256": "053741f07c75a4247a2adfbf02c111a6468f5c0c1b89697a8e1f023ac2c145bf",
+      "identical": true
+    },
+    "data_work/augment_rules.py": {
+      "original_sha256": "dbee7566a01af4a8f2d1e21afb9f31d96b6d670b75a9adba2c5ff2507246a180",
+      "current_sha256": "2cf08a29f0494d214cff52a661c37bfdd5b2e6f43386c45363dd6868d0a8433a",
+      "identical": false
+    },
+    "data_work/check_augment.py": {
+      "original_sha256": "6473e1f9d50c2b97b247298f41c044fea8149e353fdfcf72615bc836951b7be8",
+      "current_sha256": "05b3d80b5dcde875876daef799cfe180a2ecb604f16a1a2b1bc1efb672cef0f6",
+      "identical": false
+    },
+    "data_work/common.py": {
+      "original_sha256": "b368ba474b8bb93d973c4491ebf2465360c2b0a36c9cfea5d964cc093a9e2890",
+      "current_sha256": "ed8b7e2be6e12ac0a0db5a78e35a6bf3882e51196b9378d7ad6a35b0aee96b4b",
+      "identical": false
+    },
+    "runtime/koaltq/layer3.py": {
+      "original_sha256": "0c8133c80dd5c918a961f00338fe38b3f29526f5bc8af683305023f96d195ee8",
+      "current_sha256": "0c8133c80dd5c918a961f00338fe38b3f29526f5bc8af683305023f96d195ee8",
+      "identical": true
+    }
+  },
+  "preserved_training_functions": {
+    "rng_state": "8c78e1de2c2769ed786d62054430dc2db63fdeb14f0f637ddcdcbc1ab302f6cc",
+    "restore_rng": "a0c1656bb32c53867d9475c3792ff52468d9eab0bf9782a51dca8a36ff72178f",
+    "trainable_parameters": "a135cf30fae4493ba235a1ef6f00c5348f31badad3ef95554318635c1d8f9305",
+    "optimizer_for": "80126c3f3d6b1452b92921be9074c55897be0e922b78cc134ec526b7e23f73b5",
+    "backward_group": "474f42cfd3072c74982f0e170e2b6b640d8cfeff9acaa03fa321b9f38311486e"
+  },
+  "changes": {
+    "pipeline.py": "Layer1 content-key deduplication; remove unused split and Layer2 orchestration; validate raw/schema consistency",
+    "layer1_source.py": "Validate source raw/analysis before copying, retain original environment substitution and model identity checks",
+    "training.py": "Keep only original RNG, AdamW, LoRA parameter checks, NLL backward helpers; epoch loop is gemma/workflow.py",
+    "data_work": "Keep original generation/audit rules; optional fold metadata; remove K-fold and standalone legacy commands",
+    "configuration": "Full 2669 training, no validation/selection, fixed microbatch 1 / effective 8, configurable epochs, precompute inputs"
+  }
+}

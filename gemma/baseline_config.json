@@ -1,0 +1,103 @@
+{
+  "project_dir": "..",
+  "work_dir": "runs/gemma_layers_v1",
+  "sources": {
+    "train": null,
+    "test": null,
+    "sample_submission": null,
+    "existing_split": "splits/team_split.csv"
+  },
+  "documents": {
+    "train_readme": "../../current_docs/README_train.md",
+    "test_readme": "../../current_docs/README_test.md",
+    "guideline": "../../current_docs/guideline_v1.1.md",
+    "baseline": "../../current_docs/baseline_20261013.md"
+  },
+  "expected_counts": {
+    "train": 2400,
+    "test": 600
+  },
+  "require_all_materials": true,
+  "seed": 42,
+  "score_method": "sum_logprob",
+  "model": {
+    "id": "google/gemma-4-E4B-it",
+    "revision": "ee0ef6023621cff504d758262d4e04895a5af4a2",
+    "compute_dtype": "bfloat16",
+    "quantization": "nf4",
+    "double_quant": true,
+    "attention": "sdpa"
+  },
+  "input": {
+    "max_soft_tokens": 280,
+    "max_input_tokens": 6000,
+    "enable_thinking": false
+  },
+  "layer1": {
+    "batch_size": 1,
+    "max_new_tokens": 640,
+    "do_sample": false,
+    "recovery": {
+      "enabled": true,
+      "protocol": "strict_json_retry_v1",
+      "max_new_tokens": 768,
+      "retry_batch_size": 1,
+      "safe_structural_parser": "fence_strip_and_scalar_string_list_wrap_v1"
+    }
+  },
+  "runtime": {
+    "cpu_workers": 4,
+    "prefetch_images": 8,
+    "candidate_batch_trials": [
+      1
+    ],
+    "microbatch_trials": [
+      1
+    ],
+    "max_gpu_fraction": 0.9,
+    "min_free_gib": 0.6,
+    "score_atol": 0.05,
+    "score_rtol": 0.005,
+    "smoke_records": 3
+  },
+  "split": {
+    "validation_fraction": 0.2,
+    "solver_time_limit_seconds": 60,
+    "rebuild_invalid_external": false
+  },
+  "lora": {
+    "r": 8,
+    "alpha": 16,
+    "dropout": 0.0,
+    "target_suffixes": [
+      "q_proj",
+      "o_proj"
+    ]
+  },
+  "training": {
+    "epochs": 3,
+    "effective_batch_size": 8,
+    "learning_rate": 0.0001,
+    "weight_decay": 0.01,
+    "warmup_ratio": 0.05,
+    "max_grad_norm": 1.0,
+    "gradient_checkpointing": true,
+    "checkpoint_every_steps": 25,
+    "class_weight_method": "inverse_sqrt_frequency_capped_train_mean_one",
+    "class_weight_cap": 3.0,
+    "checkpoint_selection": "composite_0.5_inappropriate_f1_0.5_macro_f1_then_earliest_epoch"
+  },
+  "optional": {
+    "full_retrain_enabled": false,
+    "submission_enabled": false
+  },
+  "experiment": "lora_weighted",
+  "model_cache_dir": null,
+  "postprocess": {
+    "requested_rules": [
+      "filename_only_v1"
+    ],
+    "min_matches": 3,
+    "min_pages": 2
+  }
+}

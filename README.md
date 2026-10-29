@@ -1,5 +1,7 @@
 # KoAltQ: Qwen3-VL 한국어 대체텍스트 품질 판정
 
+Gemma NLL 2,669건 전체 학습과 매 Epoch Test 예측은 별도 [Gemma 실행 안내](gemma/README.md)를 참고하세요.
+
 `Qwen/Qwen3-VL-8B-Instruct`의 **language_model에만 QLoRA**를 적용합니다.
 Vision encoder, 최종 visual merger, DeepStack visual merger를 포함한 모든 visual projection은 동결합니다.
 
