@@ -1,6 +1,6 @@
-# KoAltQ Gemma NLL 전체 데이터 학습
+# KoAltQ Gemma Joint CE 전체 데이터 학습
 
-`KoAltQ_Gemma4_3Epoch_Improved.ipynb`의 NLL Baseline을 터미널용으로 옮겼습니다.
+`KoAltQ_Gemma4_3Epoch_Improved.ipynb`의 파이프라인에 7-Class Weighted CE + Binary CE를 적용했습니다.
 기존 Train 2,400 + 공개 Test 정답 109 + 규칙 합성 160 = **2,669건 전체**를 학습합니다.
 Validation·K-Fold·Best Checkpoint 선택·Early Stopping·학습 재개는 사용하지 않습니다.
 
@@ -59,6 +59,7 @@ python gemma/train.py \
 | `--sample-submission /path/to/sample_submission.csv` | 기본은 Test 폴더, 없으면 데이터 루트에서 탐색 |
 | `--model-cache-dir /path/to/models` | 기본은 저장소 `.cache/gemma_models/` |
 | `--validate-only` | GPU나 모델 다운로드 없이 데이터·이미지·합성·제출 ID 검사 후 종료 |
+| `--smoke-only` | 데이터 검사와 실제 GPU Joint CE 사전 검증 후 종료; 전체 학습 생략 |
 
 Layer 1 캐시는 모델 revision·양자화·processor·프롬프트·이미지 내용·생성 설정·JSON 형식을 확인합니다.
 GPU/OS/패키지 버전/코드 해시 차이는 기존 가져오기 방식대로 기록하며, 모델 조건이 다르면 중단합니다.
@@ -71,16 +72,16 @@ Layer 2의 CPU processor 출력도 내용 기반 캐시에 한 번 저장하므�
 | 항목 | 설정 |
 |---|---|
 | 모델 / revision | `google/gemma-4-E4B-it` / `ee0ef6023621cff504d758262d4e04895a5af4a2` |
-| Loss | 기존 예제별 정답 라벨 토큰 평균 NLL × 클래스 가중치, 예제 수로 평균 |
+| Loss | `0.8 × 7-Class Weighted CE + 0.2 × Binary CE`; 두 항 모두 예제 수로 평균 |
 | LoRA | 언어 self-attention `q_proj`, `o_proj`; r=8, alpha=16, dropout=0 |
 | 양자화 / dtype | NF4 4-bit, double quantization, BF16 |
 | 최적화 | AdamW, lr=1e-4, weight decay=0.01, warmup 5%, gradient clip=1 |
 | 배치 | microbatch 1 × accumulation 8, 유효 배치 8; 마지막 5건도 학습 |
 | 메모리 | 기존 비재진입 gradient checkpointing 유지, 모델 전체 FP32 변환 없음 |
-| 추론 | 기존 7개 라벨 전체 토큰 `sum_logprob`; 기존 Layer 3 후처리 |
+| 추론 | 7개 라벨 전체 토큰 `mean_logprob` Argmax; 기존 Layer 3 후처리 |
 | Layer 1 | 기존 alt·정답을 제외하는 프롬프트, `schema_recovery_v3` 유지 |
 
-원본 Notebook이 시험하던 batch 1/2 중 **1을 고정**해 16GB 메모리 여유를 확보하며 유효 배치와 Loss는 유지합니다.
+원본 Notebook이 시험하던 batch 1/2 중 **1을 고정**해 16GB 메모리 여유를 확보하며 유효 배치를 유지합니다.
 입력 문맥·이미지 해상도·LoRA 구조는 자동 축소하지 않습니다. CUDA/BF16/NF4 검사 후,
 긴 문맥 표본에서 실제 LoRA 갱신과 메모리를 확인합니다. 이 검사에 쓴 어댑터는 버리고
 동일 초기값의 새 어댑터로 전체 학습합니다. OOM이나 입력 상한 초과 시 진단과 이전 Epoch 결과를 보존하고 종료합니다.
@@ -93,6 +94,42 @@ Layer 2의 CPU processor 출력도 내용 기반 캐시에 한 번 저장하므�
 중복형·파일명형·무관형·무의미형을 각 40건 검증합니다. 생성 목표에 못 미치면 학습하지 않습니다.
 최종 분포는 적절 1,619 / 불충분형 647 / 중복형 187 / 파일명형 66 /
 무의미형 65 / 장식오용형 30 / 무관형 55입니다.
+
+### Joint CE 계산과 메모리
+
+각 후보 라벨의 점수는 `s_c = sum_logprob_c / n_tokens_c`이며,
+`P(c|x) = softmax(s)_c`입니다. 전체 라벨 토큰만 사용하고 프롬프트·이미지·padding·종료 토큰은 포함하지 않습니다.
+Type CE는 `-w_y log P(y|x)`, Binary CE는 적절이면 `-log P(적절|x)`,
+나머지는 `-log(1-P(적절|x))`입니다. 최종 손실의 Binary 비율은 **0.2로 고정**합니다.
+클래스 가중치는 기존 역제곱근 빈도·상한 3·실제 예제 가중 평균 1 계산을 그대로 사용하며,
+Binary CE에는 `weight`나 `pos_weight`를 적용하지 않습니다.
+
+가중 CE는 예제별로 계산한 뒤 예제 수로 평균합니다. 가중치 합으로 나누지 않으므로
+microbatch 1에서도 클래스 가중치가 유지됩니다. 손실 계산은 FP32로 수행하고,
+Binary CE는 `s_적절 - logsumexp(s_나머지)`를 `binary_cross_entropy_with_logits`에 전달하여 안정적으로 계산합니다.
+별도의 분류 head나 Binary 추론 임계값은 추가하지 않습니다.
+
+학습에는 7개 후보 모두의 gradient가 필요합니다. 먼저 **학습 모드**에서 gradient 저장 없이
+점수를 계산하고, 작은 `[B,7]` 점수 텐서에서 손실의 점수별 미분을 구합니다.
+후보를 하나씩 다시 forward한 뒤 해당 미분으로 backward하여 한 번에 하나의 모델 그래프만 유지합니다.
+후보 순서와 RNG를 재현하고 재계산 점수도 확인합니다. 추가 채점 forward를 사용하는 대신
+7개 그래프를 함께 보관하는 메모리 부담을 피합니다. Frozen BF16/NF4 모델과 기존 checkpointing은 유지합니다.
+마지막 부분 배치도 실제 예제 수로 평균하며 clipping과 optimizer step은 유효 배치마다 한 번 적용합니다.
+
+짧은 실제 GPU 검사 예시:
+
+```bash
+python gemma/train.py \
+  --data-root /path/to/koaltq_261014 \
+  --run-dir runs/joint_ce_smoke \
+  --layer1-cache-dir /path/to/previous_run \
+  --model-cache-dir /path/to/gemma_models \
+  --smoke-only
+```
+
+긴 문맥과 Binary CE 양쪽 정답 표본으로 실제 LoRA 갱신·기본 모델 동결·학습/추론 점수·메모리를 검사합니다.
+피크 예약 메모리 90% 이하, 캐시 반환 후 여유 0.6GiB 이상이라는 기존 기준을 유지합니다.
+결과는 `smoke/full_joint_ce/`와 `batch_plan.json`에 저장합니다. 검사용 Adapter는 초기 상태로 복원합니다.
 
 ## 저장 결과
 
@@ -114,8 +151,8 @@ RUN_DIR/
     submission.csv             # 기존 Layer 3 적용, 600행
     submission_boundary109.csv  # submission의 109건만 공개 정답 적용
     prediction_details.json    # 7개 후보 점수와 후처리 내역
-    train_steps.jsonl
-    epoch_summary.json         # 예제 수 가중 평균 Train Loss·시간·메모리·해시
+    train_steps.jsonl          # loss, type_loss, binary_loss, grad_norm 등
+    epoch_summary.json         # 세 Train Loss·시간·메모리·해시
     epoch.log
 ```
 
@@ -139,6 +176,9 @@ python gemma/train.py --data-root data/koaltq_261014 --run-dir runs/gemma_cpu_ch
 python -m pytest -q
 ```
 
+기존 GPU 환경에서 테스트할 때는 CUDA PyTorch를 유지하고 `python -m pip install 'pytest>=8.3,<10'`만 추가합니다.
+실제 데이터 테스트는 `KOALTQ_DATA_ROOT=/path/to/koaltq_261014 python -m pytest -q`로 경로를 지정할 수 있습니다.
+
 CPU 검증 범위와 실제 실행 결과는 [검증 기록](gemma/VERIFICATION.md),
 원본 코드·프롬프트 해시는 [METHOD_PRESERVATION.json](gemma/METHOD_PRESERVATION.json)에 기록합니다.
 CPU 검사와 모의 모델 검사는 실제 RTX 5070 Ti에서의 학습 완료를 의미하지 않습니다.
@@ -154,7 +194,7 @@ pyproject.toml             # Gemma 패키지와 기본 테스트 설정
 gemma/
   train.py                 # 기존 실행 진입점
   data.py, cache.py, workflow.py
-  runtime/koaltq/           # 모델·NLL·Layer 0~3·이미지·GPU 검사
+  runtime/koaltq/           # 모델·Joint CE·Layer 0~3·이미지·GPU 검사
   runtime/prompts/          # 원본 프롬프트
   data_work/               # 합성 생성·검증 공통 코드
   resources/               # 공개 라벨 CSV

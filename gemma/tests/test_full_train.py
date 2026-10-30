@@ -13,7 +13,7 @@ from gemma.data import (EXPECTED_FULL, boundary_labels, correct_boundary, read_r
                         sample_ids, unique_ids, validate_synthetic, write_predictions)
 from gemma.train import arguments, claim_run, configuration
 from gemma.runtime.koaltq.utils import LABELS, save_json
-from gemma.runtime.koaltq.scoring import class_weights, example_loss
+from gemma.runtime.koaltq.scoring import class_weights
 from gemma.runtime.koaltq.layer3 import build_policy
 from gemma.runtime.koaltq.layer1_source import key_identity, seed_cache, validate_cache
 
@@ -43,6 +43,9 @@ def test_cli_defaults_and_fresh_run(tmp_path):
     assert cfg['training']['epochs'] == 3
     assert cfg['training']['effective_batch_size'] == 8
     assert cfg['training']['gradient_checkpointing']
+    assert cfg['training']['loss'] == 'joint_ce'
+    assert cfg['training']['binary_loss_weight'] == .2
+    assert cfg['score_method'] == 'mean_logprob'
     assert cfg['runtime']['microbatch_trials'] == [1]
     assert cfg['model']['revision'] == 'ee0ef6023621cff504d758262d4e04895a5af4a2'
     assert cfg['layer1']['recovery']['supplemental_protocol'] == 'schema_recovery_v3'
@@ -54,6 +57,9 @@ def test_cli_defaults_and_fresh_run(tmp_path):
         claim_run(tmp_path, tmp_path)
     with pytest.raises(SystemExit):
         arguments(['--data-root', str(tmp_path), '--epochs', '0'])
+    assert arguments(['--data-root', str(tmp_path), '--smoke-only']).smoke_only
+    with pytest.raises(SystemExit):
+        arguments(['--data-root', str(tmp_path), '--validate-only', '--smoke-only'])
 
 
 def test_records_reject_invalid_label_and_labeled_test(tmp_path):
@@ -100,7 +106,8 @@ def test_submission_order_and_correction(tmp_path):
 
 
 def test_full_real_dataset_composition_and_synthetic_rules(tmp_path, monkeypatch):
-    data = ROOT.parent / 'data' / 'koaltq_261014'
+    import os
+    data = Path(os.environ.get('KOALTQ_DATA_ROOT', ROOT.parent / 'data' / 'koaltq_261014'))
     if not (data / 'koaltq_train/records.jsonl').exists():
         pytest.skip('Local release data not installed')
     from gemma.data_work.augment_rules import RULES, generate
@@ -137,27 +144,22 @@ def test_full_real_dataset_composition_and_synthetic_rules(tmp_path, monkeypatch
     assert len(dataset.train) == 2669
 
 
-def test_preserved_source_and_nll_helpers():
+def test_preserved_source_and_training_helpers():
     import ast
     import hashlib
     manifest = json.loads((ROOT / 'METHOD_PRESERVATION.json').read_text(encoding='utf-8'))
     for name, meta in manifest['files'].items():
+        assert hashlib.sha256((ROOT / name).read_bytes()).hexdigest() == meta['current_sha256']
         if meta['identical']:
             assert hashlib.sha256((ROOT / name).read_bytes()).hexdigest() == meta['original_sha256']
     training = ast.parse((ROOT / 'runtime/koaltq/training.py').read_text(encoding='utf-8'))
     for name, expected in manifest['preserved_training_functions'].items():
         fn = next(n for n in training.body if isinstance(n, ast.FunctionDef) and n.name == name)
         assert hashlib.sha256(ast.dump(fn).encode()).hexdigest() == expected
-
-
-def test_nll_weighting_and_partial_accumulation():
-    sums = torch.tensor([-4., -6., -3.], requires_grad=True)
-    counts = torch.tensor([2, 3, 1])
-    weights = torch.tensor([.7, 3., 1.2])
-    direct = example_loss(sums, counts, weights)
-    micro = sum(example_loss(sums[i:i+1], counts[i:i+1], weights[i:i+1]) / 3 for i in range(3))
-    assert torch.allclose(direct, micro)
-    assert float(direct.detach()) == pytest.approx((1.4 + 6. + 3.6) / 3)
+    scoring = ast.parse((ROOT / 'runtime/koaltq/scoring.py').read_text(encoding='utf-8'))
+    for name, expected in manifest['preserved_scoring_functions'].items():
+        fn = next(n for n in scoring.body if isinstance(n, ast.FunctionDef) and n.name == name)
+        assert hashlib.sha256(ast.dump(fn).encode()).hexdigest() == expected
 
 
 def test_l1_cache_integrity_identity_and_missing(tmp_path):
@@ -246,9 +248,9 @@ class TinyEngine:
 
     def forward_targets(self, pairs):
         assert self.model.training
-        n = len(pairs)
-        sums = -(self.model.lora.square() + 1).expand(n)
-        return sums, sums, torch.ones(n)
+        sums = torch.stack([-((self.model.lora[0] - .1 * (LABELS.index(lab) + 1)).square() + 1)
+                            for _, lab in pairs])
+        return sums, sums, torch.ones(len(pairs))
 
     def adapter_state(self):
         return {'lora': self.model.lora.detach().clone()}
@@ -305,7 +307,9 @@ def test_epochs_use_current_saved_weights_no_best_selection(tmp_path, size, expe
         info = result[epoch - 1]
         assert info['adapter_sha256'] == info['saved_adapter_sha256'] == info['inference_adapter_sha256']
         assert info['boundary_applied_count'] == 109
+        assert info['train_loss'] == pytest.approx(.8 * info['train_type_loss'] + .2 * info['train_binary_loss'])
         lines = [json.loads(l) for l in (out / 'train_steps.jsonl').read_text().splitlines()]
         assert sum(l['examples'] for l in lines) == size
         assert lines[-1]['examples'] == size % 8
+        assert all(l['loss'] == pytest.approx(.8 * l['type_loss'] + .2 * l['binary_loss']) for l in lines)
     assert not list(tmp_path.rglob('*best*'))

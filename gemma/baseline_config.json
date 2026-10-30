@@ -19,7 +19,7 @@
   },
   "require_all_materials": true,
   "seed": 42,
-  "score_method": "sum_logprob",
+  "score_method": "mean_logprob",
   "model": {
     "id": "google/gemma-4-E4B-it",
     "revision": "ee0ef6023621cff504d758262d4e04895a5af4a2",
@@ -75,6 +75,8 @@
     ]
   },
   "training": {
+    "loss": "joint_ce",
+    "binary_loss_weight": 0.2,
     "epochs": 3,
     "effective_batch_size": 8,
     "learning_rate": 0.0001,

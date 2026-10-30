@@ -7,7 +7,7 @@ from filelock import FileLock, Timeout
 from tqdm.auto import tqdm
 from .utils import LABELS, environment, package_versions, seed_all, file_sha, digest, read_json, save_json, code_hash
 from .images import IMAGE_POLICY
-from .scoring import append_target, collate_inputs, target_logprobs
+from .scoring import append_target, collate_inputs, target_logprobs, candidate_tasks
 
 _ACTIVE_ENGINE=False
 
@@ -176,7 +176,7 @@ class GemmaEngine:
 
     def score(self,bases: list[dict],candidate_batch: int,progress: bool=False) -> list[dict]:
         self.model.eval();out=[{} for _ in bases]
-        tasks=[(i,lab,b) for i,b in enumerate(bases) for lab in LABELS]
+        tasks=candidate_tasks(bases)
         with torch.no_grad(), tqdm(total=len(tasks),desc='비교 라벨 점수',disable=not progress) as bar:
             for start in range(0,len(tasks),candidate_batch):
                 part=tasks[start:start+candidate_batch]

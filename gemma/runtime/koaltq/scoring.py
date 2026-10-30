@@ -1,4 +1,4 @@
-"""한국어 라벨 전체 토큰 likelihood·타깃 마스킹·예제별 가중 loss."""
+"""라벨 토큰 likelihood·마스킹·7-Class Weighted CE + Binary CE."""
 from __future__ import annotations
 from collections import Counter
 import math
@@ -74,12 +74,30 @@ def target_logprobs(logits: torch.Tensor, labels: torch.Tensor) -> tuple[torch.T
     return sums,sums/counts,counts
 
 
-def example_loss(sum_logprob: torch.Tensor, token_count: torch.Tensor,
-                 example_weights: torch.Tensor) -> torch.Tensor:
-    # 예제별 전체 라벨 토큰 평균 NLL → 예제별 가중 → 예제 수로 평균
-    # 배치별 weight 합으로 나누지 않음: microbatch=1에서도 클래스 가중 효과 유지
-    if sum_logprob.shape!=example_weights.shape:raise ValueError('가중치/예제 순서 오류')
-    return ((-sum_logprob/token_count)*example_weights).mean()
+def candidate_tasks(bases: list[dict]) -> list[tuple[int,str,dict]]:
+    """학습·추론 공통: example-major, 고정 LABELS 순서."""
+    return [(i,lab,base) for i,base in enumerate(bases) for lab in LABELS]
+
+
+def joint_ce_loss(scores: torch.Tensor, targets: torch.Tensor,
+                  weights: torch.Tensor) -> tuple[torch.Tensor,torch.Tensor,torch.Tensor]:
+    """scores[B,7]는 전체 라벨 토큰의 mean log probability (temperature=1)."""
+    if scores.ndim!=2 or scores.shape[0]==0 or scores.shape[1]!=len(LABELS):
+        raise ValueError('7개 후보 점수 [B,7] 필요')
+    if targets.shape!=(scores.shape[0],) or targets.dtype!=torch.long:
+        raise ValueError('정답 인덱스 [B], int64 필요')
+    if weights.shape!=(len(LABELS),):raise ValueError('클래스 가중치 [7] 필요')
+    # 실제 BF16 모델 점수는 FP32로 계산; double은 gradient 검증용으로 보존.
+    scores=scores.to(torch.float64 if scores.dtype==torch.float64 else torch.float32)
+    weights=weights.to(device=scores.device,dtype=scores.dtype)
+    if not bool(torch.isfinite(scores).all()):raise FloatingPointError('후보 점수 NaN/Inf')
+    # weight 합으로 나누면 microbatch=1에서 가중치가 상쇄되므로 예제 수로 평균.
+    type_loss=F.cross_entropy(scores,targets,weight=weights,reduction='none').mean()
+    appropriate=LABELS.index('적절')
+    others=[i for i in range(len(LABELS)) if i!=appropriate]
+    binary_logit=scores[:,appropriate]-torch.logsumexp(scores[:,others],dim=-1)
+    binary_loss=F.binary_cross_entropy_with_logits(binary_logit,(targets==appropriate).to(scores.dtype))
+    return 0.8*type_loss+0.2*binary_loss,type_loss,binary_loss
 
 
 def class_weights(rows: list[dict], cap: float) -> dict:

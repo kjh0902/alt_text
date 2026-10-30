@@ -1,4 +1,4 @@
-"""Full-data NLL training; each epoch saves and predicts with its current adapter."""
+"""Full-data Joint CE training; each epoch predicts with its current adapter."""
 from __future__ import annotations
 
 from contextlib import contextmanager, redirect_stdout, redirect_stderr
@@ -56,15 +56,16 @@ def memory(reset=False):
             'peak_reserved_gib': torch.cuda.max_memory_reserved() / 2**30}
 
 
-def predict_epoch(engine, dataset, encoded, out, candidate_batch):
+def predict_epoch(engine, dataset, encoded, out, candidate_batch, score_method='mean_logprob'):
     """No previous epoch prediction cache and no model reload/selection."""
+    if score_method!='mean_logprob':raise ValueError('Joint CE 추론은 mean_logprob만 지원')
     engine.model.eval()
     details, predictions = [], []
     with torch.no_grad():
         # Keep only one decoded input in RAM; batch the seven candidate labels.
         for n, row in enumerate(dataset.test, 1):
             scores = engine.score([encoded.get(row)], candidate_batch)[0]
-            label = select_label(scores, 'sum_logprob')
+            label = select_label(scores, score_method)
             predictions.append({'record_id': row['record_id'], 'label': label})
             details.append({'record_id': row['record_id'], 'prediction': label, 'scores': scores})
             if n % 50 == 0 or n == len(dataset.test):
@@ -75,7 +76,7 @@ def predict_epoch(engine, dataset, encoded, out, candidate_batch):
     write_predictions(out / 'model_predictions.csv', predictions, dataset.sample_order)
     write_predictions(out / 'submission.csv', submission, dataset.sample_order)
     write_predictions(out / 'submission_boundary109.csv', corrected, dataset.sample_order)
-    save_json(out / 'prediction_details.json', {'layer2': details, 'layer3': processed,
+    save_json(out / 'prediction_details.json', {'score_method': score_method, 'layer2': details, 'layer3': processed,
         'boundary_applied_count': len(dataset.known), 'boundary_changed_count': sum(a != b for a, b in zip(submission, corrected))})
     return {'test_records': len(details), 'boundary_applied_count': len(dataset.known)}
 
@@ -107,27 +108,30 @@ def train_epochs(engine, cfg, dataset, encoded, plan):
             engine.model.train()
             memory(reset=True)
             started = time.perf_counter()
-            loss_sum, epoch_seen = 0., 0
+            loss_sums = {key: 0. for key in ('loss', 'type_loss', 'binary_loss')}
+            epoch_seen = 0
             order = np.random.default_rng(cfg['seed'] + epoch - 1).permutation(len(rows))
             for start in range(0, len(rows), effective):
                 group_rows = [rows[int(i)] for i in order[start:start + effective]]
                 group = [(r, encoded.get(r)) for r in group_rows]
-                loss = backward_group(engine, group, weights, plan['microbatch'], opt, cfg)
+                losses = backward_group(engine, group, weights, plan['microbatch'], opt, cfg)
                 # An optimizer OOM may partially update parameters: abort, never resume.
                 opt.step()
                 scheduler.step()
                 opt.zero_grad(set_to_none=True)
                 synchronize()
                 n = len(group)
-                loss_sum += loss * n
+                for key in loss_sums:
+                    loss_sums[key] += losses[key] * n
                 epoch_seen += n
                 step += 1
                 seen += n
                 append_event(out / 'train_steps.jsonl', {'epoch': epoch, 'global_step': step,
-                    'examples': n, 'loss': loss, 'learning_rate': scheduler.get_last_lr()[0],
+                    'examples': n, **losses, 'learning_rate': scheduler.get_last_lr()[0],
                     'microbatch': plan['microbatch'], 'effective_batch_size': effective})
                 if step % 25 == 0 or epoch_seen == len(rows):
-                    print(f'Epoch {epoch}: {epoch_seen}/{len(rows)}, step {step}/{total_steps}, loss {loss:.6f}', flush=True)
+                    print(f'Epoch {epoch}: {epoch_seen}/{len(rows)}, step {step}/{total_steps}, '
+                          f'loss {losses["loss"]:.6f} (type {losses["type_loss"]:.6f}, binary {losses["binary_loss"]:.6f})', flush=True)
                 del group
             synchronize()
             train_seconds = time.perf_counter() - started
@@ -146,12 +150,14 @@ def train_epochs(engine, cfg, dataset, encoded, plan):
             infer_start = time.perf_counter()
             # Persist the epoch's completed training even if inference fails.
             summary = {'epoch': epoch, 'train_examples': epoch_seen, 'optimizer_steps': steps_per_epoch,
-                'global_step': step, 'train_loss': loss_sum / epoch_seen, 'train_seconds': train_seconds,
+                'global_step': step, 'train_loss': loss_sums['loss'] / epoch_seen,
+                'train_type_loss': loss_sums['type_loss'] / epoch_seen,
+                'train_binary_loss': loss_sums['binary_loss'] / epoch_seen, 'train_seconds': train_seconds,
                 'adapter_sha256': adapter_sha, 'saved_adapter_sha256': disk_sha,
                 'status': 'adapter_saved', **train_memory}
             save_json(out / 'epoch_summary.json', summary)
             try:
-                prediction = predict_epoch(engine, dataset, encoded, out, plan['candidate_batch'])
+                prediction = predict_epoch(engine, dataset, encoded, out, plan['candidate_batch'], cfg['score_method'])
                 synchronize()
                 if engine.fingerprint() != adapter_sha:
                     raise AssertionError('Inference changed the current epoch adapter')

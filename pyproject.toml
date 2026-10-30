@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "koaltq-gemma"
 version = "0.1.0"
-description = "KoAltQ Gemma NLL full-data QLoRA training and per-epoch test predictions"
+description = "KoAltQ Gemma Joint CE full-data QLoRA training and per-epoch test predictions"
 requires-python = ">=3.11"
 
 [tool.setuptools.packages.find]

@@ -1,4 +1,75 @@
-# 검증 기록 — 2026-10-29
+# 검증 기록
+
+## Joint CE — 2026-10-30
+
+기준: `gemma-train@fb962588d112da431fd0e52832d9137fd1511ea2`.
+별도 detached 작업트리에서 수정·검증했으며 기존 브랜치와 실행 결과는 보존했습니다.
+
+환경: Ubuntu Linux, Python 3.12.3, RTX 5070 Ti 16,303MiB, 드라이버 580.173.02,
+PyTorch 2.7.1+cu128 / CUDA runtime 12.8, transformers 5.17.0, peft 0.21.0,
+bitsandbytes 0.50.2. CUDA PyTorch를 유지하고 pytest 9.2.0만 추가했습니다.
+`python -m pip check`: **No broken requirements found**.
+
+변경은 `0.8 × Weighted 7-Class CE + 0.2 × Binary CE`와 `mean_logprob` Argmax입니다.
+같은 7-Class softmax의 `P(적절)`을 Binary CE에 사용하고 Binary 가중치는 적용하지 않습니다.
+기존 클래스 가중치, 라벨 토큰 마스킹·정렬, 모델 revision, 양자화, 프롬프트, LoRA,
+유효 배치 8 및 나머지 optimizer 설정을 유지했습니다.
+후보별 2단계 재계산으로 한 번에 하나의 모델 그래프만 보관하며 RNG를 재현합니다.
+
+### CPU·실제 데이터
+
+```bash
+KOALTQ_DATA_ROOT=/path/to/koaltq_261014 python -m pytest -q
+python gemma/train.py --data-root /path/to/koaltq_261014 \
+  --run-dir runs/joint_ce_cpu_validation --validate-only
+```
+
+결과: **26 passed in 10.13s**, skip 없음. 실제 데이터 실행은 **CPU_VALIDATION_PASSED**.
+2,669개 학습 예제·3,000개 원본 이미지·600개 제출 ID를 확인했고 이미지 오류는 0건입니다.
+클래스 가중치 JSON은 기존 `gemma_full_3ep_v3/class_weights.json`과 완전히 동일합니다.
+
+테스트는 손실 수식, 두 Binary 정답, Binary 가중치 미적용, 토큰 길이 정규화와 마스킹,
+극단 점수의 유한한 손실·gradient, float64 gradcheck를 포함합니다.
+전체 그래프 기준과 재계산 방식의 gradient·AdamW 갱신을 `rtol=atol=1e-10`으로 비교했습니다.
+RNG를 사용하는 작은 모델, microbatch 분할, 마지막 부분 배치도 통과했습니다.
+Sum/Mean의 승자가 다른 후보로 실제 Epoch 예측의 Mean Argmax를 검사했습니다.
+기존 데이터·캐시·Epoch별 Adapter 해시·CSV·학습 복귀 검사도 유지했습니다.
+2,669건 × 3 Epoch 모의 학습은 1,002 optimizer step·8,007 예제를 처리했습니다.
+
+### 실제 Gemma GPU
+
+```bash
+python gemma/train.py --data-root /path/to/koaltq_261014 \
+  --run-dir runs/joint_ce_gpu_smoke \
+  --model-cache-dir /path/to/gemma_models \
+  --layer1-cache-dir /path/to/gemma_full_3ep_v3 --smoke-only
+```
+
+결과: **GPU_TEST_PASSED**, 프로세스 정상 종료.
+긴 문맥 우선으로 적절·적절·불충분형 표본을 사용했으며 입력 토큰 수는 1,722 / 1,743 / 1,945입니다.
+기존 Layer 1 캐시 3건을 검증 후 복사했고 모델 재생성은 없었습니다.
+84개 언어 attention 모듈의 LoRA 3,325,952개 파라미터만 학습했습니다.
+
+| 검사 (표본 3건당 optimizer step 1회) | Type CE 단위 가중치 | 기존 클래스 가중치 |
+|---|---:|---:|
+| 총손실 | 1.196678 | 1.127806 |
+| Type CE | 1.259392 | 1.173302 |
+| Binary CE | 0.945822 | 0.945822 |
+| clipping 전 gradient norm | 5.723527 | 4.675239 |
+| forward·backward·optimizer 시간 | 31.90초 | 31.79초 |
+| 피크 할당 / 예약 메모리 | 9.658 / 10.299GiB | 9.658 / 10.299GiB |
+| 캐시 반환 후 실제 여유 | 6.245GiB | 6.245GiB |
+
+두 시험 모두 LoRA 갱신·기본 모델 동결·메모리 기준을 통과했습니다.
+피크 예약량은 기존 90% 기준인 13.914GiB 이내이며 여유 0.6GiB 기준도 통과했습니다.
+기준 채점·추론·학습 모드 점수 비교의 최대 절대 오차는 모두 **2.3842e-7**이고 Argmax는 모두 일치했습니다.
+검사 후 Adapter 초기 상태 복원을 확인했습니다.
+
+로그와 수치는 로컬 작업트리의 `runs/joint_ce_gpu_smoke/smoke/full_joint_ce/`에 있습니다.
+이 수치는 긴 표본 3건의 짧은 실모델 검사 결과이며 전체 Epoch 처리 시간이나 성능 평가가 아닙니다.
+요청한 검증 범위에 따라 전체 3 Epoch 재학습은 실행하지 않았고 `epochs/`도 생성하지 않았습니다.
+
+## 이전 NLL 기준 검증 — 2026-10-29
 
 검증 환경: Windows, Python 3.12.14, PyTorch 2.9.1+cpu.
 Linux/RTX 5070 Ti의 실제 Gemma 학습은 이 환경에서 실행하지 않았습니다.

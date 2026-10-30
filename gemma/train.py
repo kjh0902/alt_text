@@ -15,7 +15,7 @@ from gemma.runtime.koaltq.utils import digest, file_sha, save_json, read_json
 
 
 def arguments(argv=None):
-    p = argparse.ArgumentParser(description='Gemma NLL: full 2669-example training and epoch test predictions')
+    p = argparse.ArgumentParser(description='Gemma Joint CE: full 2669-example training and epoch test predictions')
     p.add_argument('--data-root', type=Path, required=True)
     p.add_argument('--epochs', type=int, default=3)
     p.add_argument('--run-dir', type=Path, default=None)
@@ -23,7 +23,9 @@ def arguments(argv=None):
     p.add_argument('--boundary-csv', type=Path, default=ROOT / 'resources' / '경계사례_20261013.csv')
     p.add_argument('--sample-submission', type=Path)
     p.add_argument('--model-cache-dir', type=Path, default=ROOT.parent / '.cache' / 'gemma_models')
-    p.add_argument('--validate-only', action='store_true')
+    mode = p.add_mutually_exclusive_group()
+    mode.add_argument('--validate-only', action='store_true')
+    mode.add_argument('--smoke-only', action='store_true', help='Validate data and run real GPU Joint CE checks, then exit')
     args = p.parse_args(argv)
     if args.epochs < 1:
         p.error('--epochs must be positive')
@@ -62,6 +64,7 @@ def configuration(args):
     cfg['_package_root'] = str(ROOT / 'runtime')
     cfg['_work'] = str(args.run_dir)
     cfg['fresh_start_only'] = True
+    cfg['smoke_only'] = args.smoke_only
     if args.layer1_cache_dir:
         cfg['layer1_cache_source'] = {'run_dir': str(args.layer1_cache_dir), 'require_complete': False}
     cfg['method_changes'] = {
@@ -71,6 +74,9 @@ def configuration(args):
         'batching': 'microbatch=1, accumulation=8, effective batch=8; retain final partial group',
         'saving': 'every epoch adapter and test predictions; no optimizer checkpoints or resume',
         'preprocessing': 'base-only Layer1 prepared once; deterministic CPU Layer2 inputs saved once',
+        'loss': '0.8 weighted 7-class CE + 0.2 unweighted binary CE; mean label logprobs; example-count mean',
+        'backward': 'two-pass candidate recomputation with RNG replay; one model graph at a time',
+        'inference': '7-class mean_logprob argmax, matching training scores',
     }
     return cfg
 
@@ -119,9 +125,12 @@ def run(args):
                 contract = digest({'config': cfg, 'dataset': dataset.audit, 'model': engine.identity,
                     'pipeline_code': {str(p.relative_to(ROOT)): file_sha(p) for p in sorted(ROOT.rglob('*.py'))}})
                 save_json(args.run_dir / 'run_contract.json', {'sha256': contract})
-                smoke = run_smoke(engine, cfg, dataset.train, args.data_root, dataset.image_info, contract, 'full_nll')
+                smoke = run_smoke(engine, cfg, dataset.train, args.data_root, dataset.image_info, contract, 'full_joint_ce')
                 if smoke['status'] != 'GPU_TEST_PASSED' or not smoke['smoke_adapter_restored']:
                     raise RuntimeError('GPU preflight did not restore the initial adapter')
+            if args.smoke_only:
+                print('GPU smoke complete; full training was not requested:', args.run_dir, flush=True)
+                return
             with GemmaEngine(cfg) as engine:
                 # A fresh base model generates only missing Layer1 keys, including smoke hits.
                 base_rows = dataset.original + dataset.test

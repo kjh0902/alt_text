@@ -48,13 +48,13 @@
     },
     "runtime/koaltq/scoring.py": {
       "original_sha256": "c9e5ba2900190c5a2b63f67fd8430ace421d01364a927d409187417aa34fa887",
-      "current_sha256": "c9e5ba2900190c5a2b63f67fd8430ace421d01364a927d409187417aa34fa887",
-      "identical": true
+      "current_sha256": "2a4fb9dc68e18354b0fe85e9e0ad373a8b2857636ff71a4ddf543b432005255d",
+      "identical": false
     },
     "runtime/koaltq/model.py": {
       "original_sha256": "6cbc040d0fa869b7775b946b27ce7a94cf5205253ebdd2a76145a2c8dfd57938",
-      "current_sha256": "6cbc040d0fa869b7775b946b27ce7a94cf5205253ebdd2a76145a2c8dfd57938",
-      "identical": true
+      "current_sha256": "5ff4a96bbe8d7c88678a57722f52218bb32cfec486ecb23ad891df9f5da455fb",
+      "identical": false
     },
     "runtime/koaltq/gpu_memory.py": {
       "original_sha256": "0668e9342424ae484f58e4059c196c04e8250a27d1c5d344c1c1802edced401f",
@@ -78,8 +78,8 @@
     },
     "runtime/koaltq/smoke.py": {
       "original_sha256": "88586216d2f77a623fa5495b2741a917cce2e7cf1e6ba7c5249ae9437580d298",
-      "current_sha256": "88586216d2f77a623fa5495b2741a917cce2e7cf1e6ba7c5249ae9437580d298",
-      "identical": true
+      "current_sha256": "4bcfa8236c81faf81ef17a14d3ba0559bd20e9bc80a37f6868e79bf028c80cca",
+      "identical": false
     },
     "runtime/prompts/layer1_prompt.txt": {
       "original_sha256": "8a8948346b14a204a325f7159962eebdbedcb54d0ba65b8e76ac7b29a5a3e121",
@@ -116,14 +116,23 @@
     "rng_state": "8c78e1de2c2769ed786d62054430dc2db63fdeb14f0f637ddcdcbc1ab302f6cc",
     "restore_rng": "a0c1656bb32c53867d9475c3792ff52468d9eab0bf9782a51dca8a36ff72178f",
     "trainable_parameters": "a135cf30fae4493ba235a1ef6f00c5348f31badad3ef95554318635c1d8f9305",
-    "optimizer_for": "80126c3f3d6b1452b92921be9074c55897be0e922b78cc134ec526b7e23f73b5",
-    "backward_group": "474f42cfd3072c74982f0e170e2b6b640d8cfeff9acaa03fa321b9f38311486e"
+    "optimizer_for": "80126c3f3d6b1452b92921be9074c55897be0e922b78cc134ec526b7e23f73b5"
   },
   "changes": {
     "pipeline.py": "Layer1 content-key deduplication; remove unused split and Layer2 orchestration; validate raw/schema consistency",
     "layer1_source.py": "Validate source raw/analysis before copying, retain original environment substitution and model identity checks",
-    "training.py": "Keep only original RNG, AdamW, LoRA parameter checks, NLL backward helpers; epoch loop is gemma/workflow.py",
+    "training.py": "Replace token NLL backward with two-pass candidate recomputation and RNG replay; retain RNG/AdamW/LoRA checks",
     "data_work": "Keep original generation/audit rules; optional fold metadata; remove K-fold and standalone legacy commands",
-    "configuration": "Full 2669 training, no validation/selection, fixed microbatch 1 / effective 8, configurable epochs, precompute inputs"
+    "configuration": "Mean-logprob argmax; fixed lambda=0.2; remaining hyperparameters unchanged",
+    "scoring.py": "Mean label logprobs -> weighted 7-class CE + unweighted binary CE, lambda=0.2; class_weights unchanged",
+    "model.py": "Share fixed LABELS candidate ordering with Joint CE training; model/LoRA unchanged",
+    "smoke.py": "Joint CE GPU steps, both binary targets, training/inference mean-score comparison"
+  },
+  "preserved_scoring_functions": {
+    "append_target": "49c3140f1e512913197b6a33f4036b03a131bf3d19bfc92ca23a6ba5ed6e52b2",
+    "collate_inputs": "7a762fbb7d0cbdb95fc39d131421866853933888245ff2c54b8017a2fe72347d",
+    "target_logprobs": "1a37d811c9d72217bcf588af218b28ecf9f2829e55679eb1fa33c959fcdb4897",
+    "class_weights": "c83f446f711d29e9f0c2853c4746d66d4660a3b91267306506ed07bcd9d38540",
+    "select_label": "4531e25a21c71f594252a45c0e019059ed4dfe35cebd9f0306981dc02828e301"
   }
 }

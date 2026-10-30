@@ -10,7 +10,7 @@ from .prompts import load_prompts,layer2_text
 from .pipeline import prepare_layer1,encoded_stream,begin_measure,finish_measure
 from .training import backward_group,optimizer_for
 from .model import tensor_state_hash
-from .scoring import select_label,class_weights
+from .scoring import select_label,class_weights,candidate_tasks
 from .gpu_memory import snapshot, memory_decision, collect_diagnostics, print_diagnostics
 
 MEMORY_PREFLIGHT_PATCH = "koaltq_smoke_memory_probe_v2_strict"
@@ -98,6 +98,12 @@ def run_smoke(engine,cfg: dict,train: list[dict],root: Path,image_info: dict,con
     # 검증 성능과 무관한 선택: 긴 문맥 우선 + 고정 ID 순서
     chosen=sorted(train,key=lambda r:(-len(r['context_text']),r['record_id']))[:cfg['runtime']['smoke_records']]
     if not chosen:raise RuntimeError('smoke 내부 학습 표본 없음')
+    # 긴 문맥을 유지하면서 실제 Binary CE 양쪽 정답을 검사.
+    if len(chosen)>1:
+        for positive in (True,False):
+            if not any((r['label']=='적절')==positive for r in chosen):
+                eligible=[r for r in train if (r['label']=='적절')==positive]
+                if eligible:chosen[-1]=min(eligible,key=lambda r:(-len(r['context_text']),r['record_id']))
     l1,l1time=prepare_layer1(engine,cfg,chosen,root,image_info,'smoke_train')
     prompts=load_prompts(Path(cfg['_package_root']));jobs=[(r,layer2_text(r,l1[r['record_id']]['analysis'],prompts),image_info[r['record_id']]['image_sha256']) for r in chosen]
     encoded=list(encoded_stream(engine,root,jobs,cfg));bases=[b for _,b in encoded];ids=[r['record_id'] for r,_ in encoded]
@@ -122,7 +128,7 @@ def run_smoke(engine,cfg: dict,train: list[dict],root: Path,image_info: dict,con
     if not valid:
         save_json(out/'smoke_result.json', {'status':'FAILED_INFERENCE', 'common_contract_sha256':contract})
         raise RuntimeError('추론 검사 미통과. 위의 점수 일치·메모리·OOM 항목과 inference_trials.json 확인.')
-    print('[4/5] LoRA 학습 검사: 가중치 없음 / 클래스 가중치 적용')
+    print('[4/5] Joint CE LoRA 학습 검사: Type CE 단위 가중치 / 기존 클래스 가중치')
     best_infer=min(valid,key=lambda t:t['wall_seconds'])['candidate_batch']
     engine.attach_lora();initial=engine.adapter_state();initial_sha=engine.fingerprint();backward_trials=[]
     weights=class_weights(train,cfg['training']['class_weight_cap'])['weights']
@@ -133,12 +139,12 @@ def run_smoke(engine,cfg: dict,train: list[dict],root: Path,image_info: dict,con
             frozen_versions={n:p._version for n,p in engine.model.named_parameters() if not p.requires_grad}
             gc.collect();torch.cuda.empty_cache();start=begin_measure()
             try:
-                loss=backward_group(engine,encoded,weights if weighted else {l:1. for l in LABELS},micro,opt,cfg)
+                losses=backward_group(engine,encoded,weights if weighted else {l:1. for l in LABELS},micro,opt,cfg)
                 opt.step();torch.cuda.synchronize();report=finish_measure(start);updated=engine.fingerprint()!=initial_sha
                 fixed=all(p._version==frozen_versions[n] for n,p in engine.model.named_parameters() if not p.requires_grad)
-                if not updated or not fixed:raise RuntimeError('LoRA 갱신/기본 모델 고정 검사 실패')
+                if not updated or not fixed or losses['grad_norm']<=0:raise RuntimeError('LoRA 갱신/기본 모델 고정 검사 실패')
                 mem_ok=memory_ok(cfg,report)
-                backward_trials.append({'microbatch':micro,'weighted':weighted,'loss':loss,'adapter_updated':updated,
+                backward_trials.append({'microbatch':micro,'weighted':weighted,**losses,'adapter_updated':updated,
                     'frozen_parameters_unchanged':fixed,**report,'memory_ok':mem_ok})
             except torch.OutOfMemoryError:
                 backward_trials.append({'microbatch':micro,'weighted':weighted,'oom':True,'memory_ok':False})
@@ -162,6 +168,14 @@ def run_smoke(engine,cfg: dict,train: list[dict],root: Path,image_info: dict,con
     adapter_reference=engine.score_reference(bases,progress=True);adapter_scores=engine.score(bases,best_infer,progress=True)
     ok,ad=compare_scores(adapter_reference,adapter_scores,ids,cfg)
     if not ok:raise RuntimeError('LoRA 래퍼의 배치 점수 일치 검사 실패')
+    # 학습 경로는 eval 전환이나 score()의 Python 변환을 거치지 않음.
+    training_scores=[{} for _ in bases];engine.model.train()
+    with torch.no_grad():
+        for i,lab,base in candidate_tasks(bases):
+            sums,means,counts=engine.forward_targets([(base,lab)])
+            training_scores[i][lab]={'sum_logprob':float(sums[0]),'mean_logprob':float(means[0]),'n_tokens':int(counts[0])}
+    train_match,td=compare_scores(adapter_reference,training_scores,ids,cfg)
+    if not train_match:raise RuntimeError('학습·추론 Mean Log Probability 불일치')
     # 이미 확정된 배치 계획은 다른 노트북에서 임의 변경 금지
     plan_path=Path(cfg['_work'])/'batch_plan.json'
     candidate={'common_contract_sha256':contract,'candidate_batch':best_infer,'microbatch':selected_micro,
@@ -173,9 +187,13 @@ def run_smoke(engine,cfg: dict,train: list[dict],root: Path,image_info: dict,con
         if plan['microbatch'] not in [m for _,m in choices]:raise RuntimeError('기존 학습 배치 smoke 실패')
     else:plan=candidate;save_json(plan_path,plan)
     result={'status':'GPU_TEST_PASSED','experiment':experiment,'common_contract_sha256':contract,
-        'record_ids':ids,'source':'internal_train_only','reference':reference_time,'layer1':l1time,
+        'record_ids':ids,'record_labels':[r['label'] for r in chosen],
+        'input_token_counts':[int(b['input_ids'].shape[1]) for b in bases],
+        'score_method':cfg['score_method'],'loss':'joint_ce','binary_loss_weight':0.2,
+        'training_inference_match':train_match,'source':'internal_train_only','reference':reference_time,'layer1':l1time,
         'inference_trials':trials,'backward_trials':backward_trials,'plan':plan,
         'smoke_adapter_restored':engine.fingerprint()==initial_sha,'adapter_not_used_for_layer1':True,
         'unweighted_and_weighted_actual_optimizer_step':True}
     save_csv(out/'score_differences.csv',pd.DataFrame(details));save_csv(out/'adapter_score_differences.csv',pd.DataFrame(ad))
+    save_csv(out/'training_score_differences.csv',pd.DataFrame(td))
     save_json(out/'smoke_result.json',result);print('GPU_TEST_PASSED: 소량 추론·LoRA 갱신·메모리 검사 통과');return result
